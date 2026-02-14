@@ -173,7 +173,9 @@ function initEffectSpeedEditor() {
 function showEffectEditorIfDynamic(theme) {
   const editor = document.getElementById('effect-speed-editor');
   if (!editor) return;
-  if (DYNAMIC_THEMES.includes(theme)) {
+  const effect = localStorage.getItem('haven_effects') || 'auto';
+  const activeEffect = (effect !== 'auto' && effect !== 'none') ? effect : theme;
+  if (DYNAMIC_THEMES.includes(theme) || DYNAMIC_THEMES.includes(activeEffect)) {
     if (editor._show) editor._show();
   } else {
     if (editor._hide) editor._hide();
@@ -316,6 +318,43 @@ function initCustomThemeEditor() {
   editor._hide = () => { editor.style.display = 'none'; };
 }
 
+// ═══════════════════════════════════════════════════════════
+// MASHUP: EFFECT OVERLAY SELECTOR
+// ═══════════════════════════════════════════════════════════
+function applyEffect(effect) {
+  if (!effect || effect === 'auto') {
+    document.documentElement.removeAttribute('data-effects');
+  } else {
+    document.documentElement.setAttribute('data-effects', effect);
+  }
+}
+
+function initEffectSelector() {
+  const container = document.getElementById('effect-selector');
+  if (!container) return;
+
+  const saved = localStorage.getItem('haven_effects') || 'auto';
+  applyEffect(saved);
+
+  container.querySelectorAll('.effect-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.effect === saved);
+
+    btn.addEventListener('click', () => {
+      const effect = btn.dataset.effect;
+      localStorage.setItem('haven_effects', effect);
+      applyEffect(effect);
+
+      container.querySelectorAll('.effect-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.effect === effect);
+      });
+
+      // Update effect speed editor visibility
+      const theme = localStorage.getItem('haven_theme') || 'haven';
+      showEffectEditorIfDynamic(theme);
+    });
+  });
+}
+
 // ────────────────────────────────────────────────────────
 // Main theme-switcher init (shared on all pages)
 // ────────────────────────────────────────────────────────
@@ -380,6 +419,7 @@ function initThemeSwitcher(containerId, socket) {
   initCustomThemeEditor();
   initRgbEditor();
   initEffectSpeedEditor();
+  initEffectSelector();
 
   // Show correct editor on load
   if (saved === 'custom' && customEditor && customEditor._show) {

@@ -2,6 +2,9 @@
 (function() {
   var t = localStorage.getItem('haven_theme');
   if (t) document.documentElement.setAttribute('data-theme', t);
+  // Apply saved effect overlay (mashup system)
+  var fx = localStorage.getItem('haven_effects');
+  if (fx && fx !== 'auto') document.documentElement.setAttribute('data-effects', fx);
   // Apply custom theme variables if custom theme is active
   if (t === 'custom') {
     try {
