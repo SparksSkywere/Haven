@@ -275,6 +275,13 @@ function initDatabase() {
     db.exec("ALTER TABLE channels ADD COLUMN position INTEGER DEFAULT 0");
   }
 
+  // ── Migration: private sub-channels ──────────────────────
+  try {
+    db.prepare("SELECT is_private FROM channels LIMIT 0").get();
+  } catch {
+    db.exec("ALTER TABLE channels ADD COLUMN is_private INTEGER DEFAULT 0");
+  }
+
   // ── Migration: roles system ─────────────────────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS roles (

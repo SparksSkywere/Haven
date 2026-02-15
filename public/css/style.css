@@ -6928,6 +6928,15 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   font-size: 14px;
 }
 
+/* ── Private sub-channel styling ─────────────────────── */
+.private-channel .channel-name {
+  opacity: 0.65;
+  font-style: italic;
+}
+.private-channel .channel-hash {
+  font-size: 12px;
+}
+
 /* ── Role badge (user list & messages) ───────────────── */
 .user-role-badge {
   font-size: 10px;

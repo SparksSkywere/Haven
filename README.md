@@ -5,7 +5,7 @@
 
 > **Your server. Your rules. No cloud. No accounts with Big Tech. No one reading your messages.**
 
-![Version](https://img.shields.io/badge/version-1.3.2-blue)
+![Version](https://img.shields.io/badge/version-1.5.0-blue)
 ![License](https://img.shields.io/badge/license-MIT--NC-green)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
@@ -37,20 +37,22 @@ You launch it, your friends connect to your IP address, and you have a private g
 | **Chat** | Real-time messaging, image uploads (paste/drag/drop), typing indicators, message editing, replies, emoji reactions, @mentions with autocomplete, message pinning (admin) |
 | **Voice** | Peer-to-peer audio chat, per-user volume sliders, mute/deafen, join/leave audio cues, talking indicators |
 | **Screen Share** | Multi-stream screen sharing with tiled grid layout, per-user video tiles, one-click close |
+| **Channels** | Hierarchical channels with sub-channels, private (invite-only) sub-channels with 🔒 indicator, channel topics |
+| **Join Codes** | Per-channel invite codes with admin controls: public/private visibility, static/dynamic mode, time-based or join-based auto-rotation, manual rotation |
+| **Avatars** | Upload profile pictures, choose avatar shape (circle/square/hexagon/diamond), per-user shapes visible to everyone |
 | **Formatting** | **Bold**, *italic*, ~~strikethrough~~, `code`, \|\|spoilers\|\|, auto-linked URLs, fenced code blocks with language labels, blockquotes |
 | **Link Previews** | Automatic OG metadata previews for shared URLs with title, description, and thumbnail |
 | **GIF Search** | GIPHY-powered GIF picker — search and send GIFs inline (admin-configurable API key) |
 | **Direct Messages** | Private 1-on-1 conversations — click 💬 on any user in the member list |
 | **User Status** | Online, Away, Do Not Disturb, Invisible — with custom status text and auto-away after 5 min idle |
-| **Channel Topics** | Admin-settable topic line below the channel header — click to edit |
 | **File Sharing** | Upload and share PDFs, documents, audio, video, archives (up to 25 MB) with inline players |
 | **Persistent Unread** | Server-tracked read state — unread badges survive page refreshes and reconnects |
 | **Slash Commands** | `/shrug`, `/tableflip`, `/roll 2d20`, `/flip`, `/me`, `/spoiler`, `/tts`, and more — type `/` to see them all |
 | **Search** | Search messages in any channel with Ctrl+F |
-| **Themes** | 12 built-in themes: Haven, Discord, Matrix, Tron, HALO, LoTR, Cyberpunk, Nord, Dracula, Bloodborne, Ice, Abyss |
+| **Themes** | 20+ themes with stackable visual effects: CRT, Matrix Rain, Cyberpunk Text Scramble, Snowfall, Campfire Embers, and more — configurable intensity/frequency sliders |
 | **Multi-Server** | Add friends' Haven servers to your sidebar with live online/offline status |
 | **Notifications** | 5 notification sounds, per-channel volume controls |
-| **Moderation** | Admin: kick, mute (timed), ban, delete users, delete channels, auto-cleanup |
+| **Moderation** | Admin: kick, mute (timed), ban, delete users, delete channels, auto-cleanup. Role system with granular permissions. |
 | **Security** | Bcrypt passwords, JWT auth, HTTPS/SSL, rate limiting, CSP headers, input validation |
 | **Game** | Shippy Container — Drew's shipment got hung up. Server-wide leaderboard. |
 
@@ -336,13 +338,16 @@ That's it. All users can now search and send GIFs.
 
 Planned features — roughly in priority order:
 
-| Feature | Description |
-|---------|-------------|
-| **Webhook / Bot support** | Incoming webhooks and a lightweight bot API so external services can post messages and respond to events. |
-| **Permission levels** | Role-based access (Admin → Moderator → Member → Guest) with granular per-channel overrides. |
-| **Thread replies** | Threaded conversations that branch off a message without cluttering the main chat. |
-| **File sharing improvements** | Drag-and-drop multi-file uploads, file previews, and a searchable file history per channel. |
-| **End-to-end encryption (E2EE)** | Optional per-channel E2EE using client-managed keys for maximum privacy. |
+| Feature | Status | Description |
+|---------|--------|-------------|
+| **Sub-channels** | ✅ Done | Hierarchical channels with auto-membership inheritance and private (invite-only) sub-channels |
+| **Join code management** | ✅ Done | Admin controls: public/private visibility, static/dynamic mode, time/join-based rotation |
+| **Role system** | ✅ Done | Role-based access with granular per-channel permissions |
+| **Avatar system** | ✅ Done | Profile picture uploads with selectable avatar shapes (circle, square, hexagon, diamond) |
+| **Effect system** | ✅ Done | 15+ stackable visual effects with configurable intensity/frequency |
+| **Webhook / Bot support** | 🚧 Next | Incoming webhooks and a lightweight bot API for external integrations |
+| **Thread replies** | 📋 Planned | Threaded conversations that branch off a message |
+| **End-to-end encryption** | 📋 Planned | Optional per-channel E2EE using client-managed keys |
 
 > Want something else? Open an issue — PRs are always welcome.
 

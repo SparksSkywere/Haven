@@ -446,7 +446,7 @@ class HavenApp {
           const activeEl = document.querySelector(`.channel-item[data-code="${data.newCode}"]`);
           if (activeEl) activeEl.classList.add('active');
         }
-        if (this.isAdmin) {
+        if (this.user.isAdmin) {
           this._showToast(`Channel code rotated for #${ch.name}`, 'info');
         }
       }
@@ -803,10 +803,32 @@ class HavenApp {
       this._closeChannelCtxMenu();
       const parentCh = this.channels.find(c => c.code === code);
       if (!parentCh) return;
-      const name = prompt(`Create sub-channel under #${parentCh.name}:\nEnter sub-channel name:`);
-      if (name && name.trim()) {
-        this.socket.emit('create-sub-channel', { parentCode: code, name: name.trim() });
-      }
+      // Show the create-sub-channel modal
+      document.getElementById('create-sub-name').value = '';
+      document.getElementById('create-sub-private').checked = false;
+      document.getElementById('create-sub-parent-name').textContent = `# ${parentCh.name}`;
+      document.getElementById('create-sub-modal').style.display = 'flex';
+      document.getElementById('create-sub-modal')._parentCode = code;
+      document.getElementById('create-sub-name').focus();
+    });
+    // Create sub-channel modal confirm/cancel
+    document.getElementById('create-sub-confirm-btn')?.addEventListener('click', () => {
+      const modal = document.getElementById('create-sub-modal');
+      const name = document.getElementById('create-sub-name').value.trim();
+      const isPrivate = document.getElementById('create-sub-private').checked;
+      if (!name) return;
+      this.socket.emit('create-sub-channel', {
+        parentCode: modal._parentCode,
+        name,
+        isPrivate
+      });
+      modal.style.display = 'none';
+    });
+    document.getElementById('create-sub-cancel-btn')?.addEventListener('click', () => {
+      document.getElementById('create-sub-modal').style.display = 'none';
+    });
+    document.getElementById('create-sub-modal')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
     });
     // Rename channel / sub-channel
     document.querySelector('[data-action="rename-channel"]')?.addEventListener('click', () => {
@@ -1364,7 +1386,7 @@ class HavenApp {
 
     // ── Channel Code Settings Modal ─────────────────────
     document.getElementById('channel-code-settings-btn')?.addEventListener('click', () => {
-      if (!this.currentChannel || !this.isAdmin) return;
+      if (!this.currentChannel || !this.user.isAdmin) return;
       const channel = this.channels.find(c => c.code === this.currentChannel);
       if (!channel || channel.is_dm) return;
 
@@ -2172,7 +2194,7 @@ class HavenApp {
     // Show channel code settings gear for admins on non-DM channels
     const codeSettingsBtn = document.getElementById('channel-code-settings-btn');
     if (codeSettingsBtn) {
-      codeSettingsBtn.style.display = (!isDm && this.isAdmin) ? 'inline-flex' : 'none';
+      codeSettingsBtn.style.display = (!isDm && this.user.isAdmin) ? 'inline-flex' : 'none';
     }
     // Update voice button state — persist controls if in voice anywhere
     if (this.voice && this.voice.inVoice) {
@@ -2342,15 +2364,17 @@ class HavenApp {
 
     const renderChannelItem = (ch, isSub) => {
       const el = document.createElement('div');
-      el.className = 'channel-item' + (isSub ? ' sub-channel-item' : '') + (ch.code === this.currentChannel ? ' active' : '');
+      el.className = 'channel-item' + (isSub ? ' sub-channel-item' : '') + (ch.is_private ? ' private-channel' : '') + (ch.code === this.currentChannel ? ' active' : '');
       el.dataset.code = ch.code;
       if (isSub) el.dataset.parentId = ch.parent_channel_id;
 
       const hasSubs = !isSub && (subChannelMap[ch.id] || []).length > 0;
       const isCollapsed = hasSubs && localStorage.getItem(`haven_subs_collapsed_${ch.code}`) === 'true';
 
+      const hashIcon = isSub ? (ch.is_private ? '🔒' : '↳') : '#';
+
       el.innerHTML = `
-        <span class="channel-hash">${isSub ? '↳' : '#'}</span>
+        <span class="channel-hash">${hashIcon}</span>
         ${hasSubs ? `<span class="channel-collapse-arrow${isCollapsed ? ' collapsed' : ''}" title="Expand/collapse sub-channels">▾</span>` : ''}
         <span class="channel-name">${this._escapeHtml(ch.name)}</span>
         <button class="channel-more-btn" title="Channel options">⋯</button>

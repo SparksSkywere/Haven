@@ -809,6 +809,24 @@
     <button class="channel-ctx-item admin-only danger" data-action="delete">🗑️ Delete Channel</button>
   </div>
 
+  <!-- Create Sub-channel Modal -->
+  <div class="modal-overlay" id="create-sub-modal" style="display:none">
+    <div class="modal-box" style="max-width:380px">
+      <h3>Create Sub-channel</h3>
+      <p class="modal-desc" id="create-sub-parent-name"></p>
+      <label style="display:block;margin:12px 0 6px;font-size:0.85rem;opacity:0.7">Sub-channel name</label>
+      <input type="text" id="create-sub-name" class="input" maxlength="50" placeholder="sub-channel name..." style="width:100%">
+      <label class="checkbox-row" style="margin:14px 0 8px;display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="create-sub-private" style="width:16px;height:16px">
+        <span style="font-size:0.9rem">🔒 Private <span style="opacity:0.5;font-size:0.8rem">(invite-only, hidden from non-members)</span></span>
+      </label>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        <button class="btn-sm" id="create-sub-cancel-btn">Cancel</button>
+        <button class="btn-sm btn-accent" id="create-sub-confirm-btn">Create</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Stackable effect overlay container -->
   <div id="fx-layers"></div>
 

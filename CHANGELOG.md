@@ -11,6 +11,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 
 ---
 
+## [1.5.0] — 2026-02-14
+
+### Added
+- **Private sub-channels** — when creating a sub-channel, a 🔒 Private checkbox is available. Private sub-channels only add the creator as initial member (not all parent members) and show a lock icon in the sidebar. Only users with the code can join.
+- **Auto-join sub-channels** — when a user joins a parent channel, they're now automatically added to all non-private sub-channels of that parent. Previously, only users present at sub-channel creation were added.
+- **Create sub-channel modal** — replaced the basic browser `prompt()` with a proper modal dialog that includes a name field and private checkbox.
+- **Avatar system overhaul** — profile pictures now upload via HTTP (`/api/upload-avatar`) instead of Socket.io, fixing the silent disconnect caused by base64 data URLs exceeding Socket.io's 64KB buffer limit. Avatar shapes (circle, square, hexagon, diamond) are now stored per-user in the database and visible to all users in messages.
+- **Avatar Save button** — avatar changes now require explicit save instead of auto-saving, preventing accidental changes.
+- **Cyberpunk text scramble effect** — replaced the old CSS glitch animation with a JS-powered text scramble that randomly cycles text through random characters before resolving. Affects the HAVEN logo, channel names, section labels, usernames, and the channel header.
+- **Glitch frequency slider** — configurable scramble frequency when the cyberpunk effect is active. Saved to localStorage.
+- **Expanded scramble targets** — the text scramble effect now hits sidebar text, channel headers, user names, and section labels (not just the logo).
+
+### Fixed
+- **Channel code settings gear icon never appearing** — `this.isAdmin` was used in 3 places but never defined; should have been `this.user.isAdmin`. The ⚙️ gear icon next to channel codes now correctly appears for admins.
+- **`_setupStatusPicker` crash** — `insertBefore` was called on the wrong parent node, causing `Uncaught NotFoundError`. Fixed to use `currentUser.parentNode`.
+- **Messages breaking after avatar save** — root cause was Socket.io's `maxHttpBufferSize: 64KB` silently killing the connection when large base64 avatars were sent. Moved avatar upload to HTTP.
+- **Avatar resetting on reload** — avatars are now persisted server-side via HTTP upload and reloaded from the database on reconnect.
+- **Avatar shape affecting all users** — shapes were previously a local-only preference. Now stored in the `users` table and sent per-message so each user's chosen shape is visible to everyone.
+
+### Changed
+- **`is_private` column** added to `channels` table (migration auto-runs on startup).
+- **`avatar_shape` column** added to `users` table.
+- Version bumped to 1.5.0.
+- Updated README features table, roadmap, and GUIDE with comprehensive documentation on channels, sub-channels, join codes, avatars, and effects.
+
+---
+
 ## [1.4.7] — 2026-02-13
 
 ### Fixed

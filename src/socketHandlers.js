@@ -402,7 +402,7 @@ function setupSocketHandlers(io, db) {
       const channels = db.prepare(`
         SELECT c.id, c.name, c.code, c.created_by, c.topic, c.is_dm,
                c.code_visibility, c.code_mode, c.code_rotation_type, c.code_rotation_interval,
-               c.parent_channel_id, c.position
+               c.parent_channel_id, c.position, c.is_private
         FROM channels c
         JOIN channel_members cm ON c.id = cm.channel_id
         WHERE cm.user_id = ?
@@ -536,6 +536,18 @@ function setupSocketHandlers(io, db) {
         db.prepare(
           'INSERT INTO channel_members (channel_id, user_id) VALUES (?, ?)'
         ).run(channel.id, socket.user.id);
+
+        // Auto-add to all non-private sub-channels of this channel
+        if (!channel.parent_channel_id) {
+          const subs = db.prepare(
+            'SELECT id, code FROM channels WHERE parent_channel_id = ? AND is_private = 0'
+          ).all(channel.id);
+          const insertSub = db.prepare('INSERT OR IGNORE INTO channel_members (channel_id, user_id) VALUES (?, ?)');
+          subs.forEach(sub => {
+            insertSub.run(sub.id, socket.user.id);
+            socket.join(`channel:${sub.code}`);
+          });
+        }
 
         // Join-based code rotation: increment counter and rotate if threshold reached
         if (channel.code_mode === 'dynamic' && channel.code_rotation_type === 'joins') {
@@ -2760,7 +2772,7 @@ function setupSocketHandlers(io, db) {
             const chs = db.prepare(`
               SELECT c.id, c.name, c.code, c.created_by, c.topic, c.is_dm,
                      c.code_visibility, c.code_mode, c.code_rotation_type, c.code_rotation_interval,
-                     c.parent_channel_id, c.position
+                     c.parent_channel_id, c.position, c.is_private
               FROM channels c
               JOIN channel_members cm ON c.id = cm.channel_id
               WHERE cm.user_id = ?
@@ -2805,6 +2817,7 @@ function setupSocketHandlers(io, db) {
       }
 
       const code = generateChannelCode();
+      const isPrivate = data.isPrivate ? 1 : 0;
 
       // Get max position for ordering
       const maxPos = db.prepare('SELECT MAX(position) as mp FROM channels WHERE parent_channel_id = ?').get(parentChannel.id);
@@ -2812,13 +2825,17 @@ function setupSocketHandlers(io, db) {
 
       try {
         const result = db.prepare(
-          'INSERT INTO channels (name, code, created_by, parent_channel_id, position) VALUES (?, ?, ?, ?, ?)'
-        ).run(name, code, socket.user.id, parentChannel.id, position);
+          'INSERT INTO channels (name, code, created_by, parent_channel_id, position, is_private) VALUES (?, ?, ?, ?, ?, ?)'
+        ).run(name, code, socket.user.id, parentChannel.id, position, isPrivate);
 
-        // Auto-join all members of the parent channel
+        // Auto-join all members of the parent channel (even for private — creator controls who's in)
         const parentMembers = db.prepare('SELECT user_id FROM channel_members WHERE channel_id = ?').all(parentChannel.id);
+        // For private sub-channels, only auto-join the creator
+        const membersToAdd = isPrivate
+          ? [{ user_id: socket.user.id }]
+          : parentMembers;
         const insertMember = db.prepare('INSERT OR IGNORE INTO channel_members (channel_id, user_id) VALUES (?, ?)');
-        parentMembers.forEach(m => insertMember.run(result.lastInsertRowid, m.user_id));
+        membersToAdd.forEach(m => insertMember.run(result.lastInsertRowid, m.user_id));
 
         // Broadcast updated channel list to all connected clients
         for (const [, s] of io.sockets.sockets) {
@@ -2826,7 +2843,7 @@ function setupSocketHandlers(io, db) {
             const chs = db.prepare(`
               SELECT c.id, c.name, c.code, c.created_by, c.topic, c.is_dm,
                      c.code_visibility, c.code_mode, c.code_rotation_type, c.code_rotation_interval,
-                     c.parent_channel_id, c.position
+                     c.parent_channel_id, c.position, c.is_private
               FROM channels c
               JOIN channel_members cm ON c.id = cm.channel_id
               WHERE cm.user_id = ?
@@ -2868,7 +2885,7 @@ function setupSocketHandlers(io, db) {
             const channels = db.prepare(`
               SELECT c.id, c.name, c.code, c.created_by, c.topic, c.is_dm,
                      c.code_visibility, c.code_mode, c.code_rotation_type, c.code_rotation_interval,
-                     c.parent_channel_id, c.position
+                     c.parent_channel_id, c.position, c.is_private
               FROM channels c
               JOIN channel_members cm ON c.id = cm.channel_id
               WHERE cm.user_id = ?

@@ -48,6 +48,126 @@ They'll register their own account, then enter the code to join your channel.
 
 ---
 
+## 📂 Channels & Sub-Channels
+
+### How Channels Work
+
+Every conversation in Haven happens inside a **channel**. Channels are like rooms — each has a unique 8-character code (e.g. `a3f8b2c1`). To get into a channel, you either create it or enter its code.
+
+### Creating Sub-Channels
+
+Right-click (or click ⋯) on any channel to create a **sub-channel** beneath it. Sub-channels appear indented under their parent with a `↳` icon. They have their own code and their own message history.
+
+**When you create a sub-channel:**
+- All current parent channel members are **automatically added** to it
+- The sub-channel gets its own unique invite code
+- Max one level deep (no sub-sub-channels)
+
+**When someone joins a parent channel later:**
+- They're **automatically added** to all non-private sub-channels of that parent
+- They do NOT get access to private sub-channels (see below)
+
+### Private Sub-Channels 🔒
+
+When creating a sub-channel, check the **🔒 Private** checkbox. Private sub-channels:
+- Only add the **creator** as initial member (not all parent members)
+- Show a **🔒** icon instead of `↳` in the sidebar
+- Appear in *italic* text with reduced opacity
+- Can only be joined by entering the sub-channel's code directly
+- Are invisible to non-members (they won't see it in their channel list)
+
+Use private sub-channels for admin-only discussions, sensitive topics, or small breakout groups within a larger channel.
+
+---
+
+## 🔑 Join Code Settings (Admin)
+
+Each channel's invite code can be configured by admins. Click the **⚙️ gear icon** next to the channel code in the header.
+
+### Code Visibility
+| Setting | Behavior |
+|---------|----------|
+| **Public** | All members can see the channel code |
+| **Private** | Only admins see the code; others see `••••••••` |
+
+### Code Mode
+| Setting | Behavior |
+|---------|----------|
+| **Static** | Code never changes |
+| **Dynamic** | Code automatically rotates based on a trigger |
+
+### Rotation Triggers (Dynamic mode only)
+| Trigger | Behavior |
+|---------|----------|
+| **Time-based** | Code rotates every X minutes |
+| **Join-based** | Code rotates after X new members join |
+
+You can also click **Rotate Now** to manually change the code immediately.
+
+> 💡 Dynamic codes are great for public communities where you want to limit code sharing. Old codes stop working after rotation.
+
+---
+
+## 🖼️ Avatars
+
+### Uploading a Profile Picture
+
+1. Click the **⚙️ Settings** button in the sidebar
+2. In the **Avatar** section, click **Upload**
+3. Choose an image (max 2 MB; JPEG, PNG, GIF, or WebP)
+4. Pick a shape: ⚪ Circle, ⬜ Square, ⬡ Hexagon, or ◇ Diamond
+5. Click **Save**
+
+Your avatar and shape are visible to everyone in messages and the member list. Each user's shape is stored independently.
+
+### Removing Your Avatar
+
+Click **Clear** to remove your avatar and revert to the default initial-letter avatar.
+
+---
+
+## 🎨 Themes & Effects
+
+### Themes
+
+Haven includes 20+ visual themes. Click the **🎨** button at the bottom of the sidebar to open the theme picker. Themes change colors, fonts, and overall aesthetic. Your choice is saved per browser.
+
+### Effect Overlays
+
+Effects are stackable visual layers on top of any theme. Choose from the effect selector in the theme popup:
+
+| Effect | Description |
+|--------|-------------|
+| **⟳ Auto** | Matches your current theme's default effect |
+| **🚫 None** | No overlays |
+| **📺 CRT** | Retro scanlines + vignette + flicker |
+| **Ⅿ Matrix** | Green digital rain cascade |
+| **❄ Snowfall** | Falling snowflakes |
+| **🔥 Campfire** | Ember particles + warm glow |
+| **💍 Golden Grace** | Elden Ring-style golden particles |
+| **🩸 Blood Vignette** | Dark pulsing edges |
+| **☢️ Phosphor** | Fallout-style green vignette |
+| **⚔️ Water Flow** | Gentle blue sidebar animation |
+| **🧊 Frost** | Ice shimmer + icicle borders |
+| **⚡ Glitch** | Cyberpunk text scramble (see below) |
+| **⚜ Candlelight** | Warm sidebar glow |
+| **🌊 Ocean Depth** | Deep blue vignette |
+| **✝️ / ⛪ / 🕊️** | Sacred themed overlays |
+
+### Cyberpunk Text Scramble ⚡
+
+When the Glitch effect is active, text around the UI randomly "scrambles" — cycling through random characters before resolving back to the original text. This affects:
+- The **HAVEN** logo
+- Channel names in the sidebar
+- Section labels
+- Your username
+- The channel header
+- User names in the member list
+
+A **Glitch Frequency** slider appears in the theme popup when this effect is active. Slide left for rare, subtle glitches — or right for constant chaos.
+
+---
+
 ## 🌐 Setting Up Remote Access (Friends Over the Internet)
 
 If your friends are **not** on your local WiFi, you need to set up port forwarding so they can reach your PC from the internet.
