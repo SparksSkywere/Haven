@@ -766,6 +766,7 @@ class HavenApp {
     this.socket.on('server-settings', (settings) => {
       this.serverSettings = settings;
       this._applyServerSettings();
+      this._maybeShowSetupWizard();
     });
 
     this.socket.on('server-setting-changed', (data) => {
@@ -8283,6 +8284,253 @@ class HavenApp {
         }
       });
     });
+  }
+
+  // ── First-Time Setup Wizard ─────────────────────────────
+
+  _maybeShowSetupWizard() {
+    // Only show for admin, only if wizard hasn't been completed
+    if (!this.user?.isAdmin) return;
+    if (this.serverSettings?.setup_wizard_complete === 'true') return;
+    if (this._wizardShown) return;
+    this._wizardShown = true;
+
+    const modal = document.getElementById('setup-wizard-modal');
+    if (!modal) return;
+
+    this._wizardStep = 1;
+    this._wizardChannelCode = null;
+    this._wizardPortResult = null;
+
+    // Pre-fill server name from settings
+    const nameInput = document.getElementById('wizard-server-name');
+    if (nameInput && this.serverSettings?.server_name) {
+      nameInput.value = this.serverSettings.server_name;
+    }
+
+    this._wizardUpdateUI();
+    modal.style.display = 'flex';
+
+    // Button handlers (clean up old listeners)
+    const nextBtn = document.getElementById('wizard-next-btn');
+    const backBtn = document.getElementById('wizard-back-btn');
+    const skipBtn = document.getElementById('wizard-skip-btn');
+    const portBtn = document.getElementById('wizard-check-port-btn');
+    const copyBtn = document.getElementById('wizard-copy-code');
+
+    const newNext = nextBtn.cloneNode(true);
+    nextBtn.parentNode.replaceChild(newNext, nextBtn);
+    const newBack = backBtn.cloneNode(true);
+    backBtn.parentNode.replaceChild(newBack, backBtn);
+    const newSkip = skipBtn.cloneNode(true);
+    skipBtn.parentNode.replaceChild(newSkip, skipBtn);
+    const newPort = portBtn.cloneNode(true);
+    portBtn.parentNode.replaceChild(newPort, portBtn);
+    const newCopy = copyBtn.cloneNode(true);
+    copyBtn.parentNode.replaceChild(newCopy, copyBtn);
+
+    newNext.addEventListener('click', () => this._wizardNext());
+    newBack.addEventListener('click', () => this._wizardBack());
+    newSkip.addEventListener('click', () => this._wizardComplete());
+    newPort.addEventListener('click', () => this._wizardCheckPort());
+    newCopy.addEventListener('click', () => {
+      if (this._wizardChannelCode) {
+        navigator.clipboard.writeText(this._wizardChannelCode).then(() => {
+          newCopy.textContent = 'Copied!';
+          setTimeout(() => newCopy.textContent = 'Copy', 2000);
+        });
+      }
+    });
+  }
+
+  _wizardUpdateUI() {
+    const step = this._wizardStep;
+
+    // Update step indicators
+    document.querySelectorAll('.wizard-indicator').forEach(ind => {
+      const s = parseInt(ind.dataset.step);
+      ind.classList.remove('active', 'done');
+      if (s === step) ind.classList.add('active');
+      else if (s < step) ind.classList.add('done');
+    });
+
+    // Show/hide steps
+    for (let i = 1; i <= 4; i++) {
+      const el = document.getElementById(`wizard-step-${i}`);
+      if (el) el.style.display = i === step ? 'block' : 'none';
+    }
+
+    // Back button
+    const backBtn = document.getElementById('wizard-back-btn');
+    if (backBtn) backBtn.style.display = step > 1 ? '' : 'none';
+
+    // Next/Finish button text
+    const nextBtn = document.getElementById('wizard-next-btn');
+    if (nextBtn) {
+      if (step === 4) {
+        nextBtn.textContent = '🚀 Get Started';
+      } else if (step === 2 && !this._wizardChannelCode) {
+        nextBtn.textContent = 'Create & Continue →';
+      } else {
+        nextBtn.textContent = 'Next →';
+      }
+    }
+
+    // Step 4 summary
+    if (step === 4) {
+      const chanSummary = document.getElementById('wizard-summary-channel');
+      if (chanSummary) {
+        chanSummary.textContent = this._wizardChannelCode
+          ? `✅ Channel created (code: ${this._wizardChannelCode})`
+          : '⏭️ No channel created (you can create one from the sidebar)';
+      }
+      const portSummary = document.getElementById('wizard-summary-port');
+      if (portSummary) {
+        if (this._wizardPortResult === true) portSummary.textContent = '✅ Port is open — friends can connect from anywhere';
+        else if (this._wizardPortResult === false) portSummary.textContent = '⚠️ Port not reachable — check port forwarding for remote access';
+        else portSummary.textContent = '⏭️ Port check skipped';
+      }
+
+      // Set final URL
+      const urlEl = document.getElementById('wizard-final-url');
+      if (urlEl && this._wizardPublicIp) {
+        const port = location.port || (location.protocol === 'https:' ? '443' : '80');
+        urlEl.textContent = `${location.protocol}//${this._wizardPublicIp}:${port}`;
+      }
+    }
+  }
+
+  _wizardNext() {
+    const step = this._wizardStep;
+
+    if (step === 1) {
+      // Save server name if changed
+      const nameInput = document.getElementById('wizard-server-name');
+      const name = nameInput?.value?.trim();
+      if (name && name !== (this.serverSettings?.server_name || 'Haven')) {
+        this.socket.emit('update-server-setting', { key: 'server_name', value: name });
+      }
+      this._wizardStep = 2;
+      this._wizardUpdateUI();
+
+    } else if (step === 2) {
+      // Create channel if not already created
+      if (!this._wizardChannelCode) {
+        const nameInput = document.getElementById('wizard-channel-name');
+        const channelName = nameInput?.value?.trim() || 'General';
+
+        // Listen for channel creation result
+        const handler = (data) => {
+          if (data.channels) {
+            // Find the newly created channel (last one)
+            const newest = data.channels[data.channels.length - 1];
+            if (newest && newest.code) {
+              this._wizardChannelCode = newest.code;
+              const resultDiv = document.getElementById('wizard-channel-result');
+              const codeEl = document.getElementById('wizard-channel-code');
+              if (resultDiv) resultDiv.style.display = 'block';
+              if (codeEl) codeEl.textContent = newest.code;
+              nameInput.disabled = true;
+              this._wizardUpdateUI();
+            }
+          }
+          this.socket.off('channels', handler);
+        };
+        this.socket.on('channels', handler);
+        this.socket.emit('create-channel', channelName);
+      } else {
+        this._wizardStep = 3;
+        this._wizardUpdateUI();
+      }
+
+    } else if (step === 3) {
+      this._wizardStep = 4;
+      this._wizardUpdateUI();
+
+    } else if (step === 4) {
+      this._wizardComplete();
+    }
+  }
+
+  _wizardBack() {
+    if (this._wizardStep > 1) {
+      this._wizardStep--;
+      this._wizardUpdateUI();
+    }
+  }
+
+  async _wizardCheckPort() {
+    const checkBtn = document.getElementById('wizard-check-port-btn');
+    const checking = document.getElementById('wizard-port-checking');
+    const result = document.getElementById('wizard-port-result');
+
+    if (checkBtn) checkBtn.style.display = 'none';
+    if (checking) checking.style.display = 'flex';
+    if (result) result.style.display = 'none';
+
+    try {
+      const resp = await fetch('/api/port-check', {
+        headers: { 'Authorization': `Bearer ${this.token}` }
+      });
+      const data = await resp.json();
+
+      if (checking) checking.style.display = 'none';
+      if (result) result.style.display = 'block';
+
+      this._wizardPublicIp = data.publicIp;
+
+      if (data.reachable) {
+        this._wizardPortResult = true;
+        result.innerHTML = `
+          <div class="wizard-port-success">
+            ✅ <strong>Your server is reachable from the internet!</strong><br>
+            Public IP: <code>${data.publicIp}</code><br>
+            Friends can connect at: <code>${location.protocol}//${data.publicIp}:${location.port || 3000}</code>
+          </div>`;
+      } else {
+        this._wizardPortResult = false;
+        const port = location.port || 3000;
+        result.innerHTML = `
+          <div class="wizard-port-fail">
+            ⚠️ <strong>Port ${port} is not reachable from the internet.</strong><br>
+            ${data.publicIp ? `Your public IP is <code>${data.publicIp}</code>, but the port is blocked.` : data.error || 'Could not reach port.'}<br><br>
+            <strong>To fix this:</strong>
+            <ol>
+              <li>Log into your router (usually <code>192.168.1.1</code>)</li>
+              <li>Find <strong>Port Forwarding</strong> (or NAT / Virtual Servers)</li>
+              <li>Forward port <code>${port}</code> (TCP) to your PC's local IP</li>
+              <li>Open <strong>Windows Firewall</strong> for port <code>${port}</code></li>
+              <li>Re-run this check</li>
+            </ol>
+            <strong>LAN only?</strong> If friends are on the same WiFi, this doesn't matter — they can connect directly.
+          </div>`;
+        if (checkBtn) {
+          checkBtn.textContent = '🔄 Re-check';
+          checkBtn.style.display = '';
+        }
+      }
+    } catch (err) {
+      if (checking) checking.style.display = 'none';
+      if (result) {
+        result.style.display = 'block';
+        result.innerHTML = `<div class="wizard-port-fail">❌ Check failed: ${err.message}. You may be offline.</div>`;
+      }
+      if (checkBtn) {
+        checkBtn.textContent = '🔄 Retry';
+        checkBtn.style.display = '';
+      }
+    }
+  }
+
+  _wizardComplete() {
+    // Mark wizard as complete in server settings
+    this.socket.emit('update-server-setting', { key: 'setup_wizard_complete', value: 'true' });
+
+    // Close the modal
+    const modal = document.getElementById('setup-wizard-modal');
+    if (modal) modal.style.display = 'none';
+
+    this._showToast('Setup complete! Welcome to Haven.', 'success');
   }
 
   _applyServerSettings() {

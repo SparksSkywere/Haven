@@ -461,6 +461,112 @@
   <!-- Toast notifications -->
   <div id="toast-container"></div>
 
+  <!-- First-Time Setup Wizard (Admin only) -->
+  <div class="modal-overlay" id="setup-wizard-modal" style="display:none">
+    <div class="modal modal-wizard">
+      <div class="wizard-header">
+        <span class="wizard-hex">⬡</span>
+        <h2>Welcome to Haven</h2>
+        <p class="wizard-subtitle">Let's get your server ready. This only takes a minute.</p>
+      </div>
+
+      <div class="wizard-steps">
+        <!-- Step indicators -->
+        <div class="wizard-step-indicators">
+          <div class="wizard-indicator active" data-step="1">1</div>
+          <div class="wizard-indicator-line"></div>
+          <div class="wizard-indicator" data-step="2">2</div>
+          <div class="wizard-indicator-line"></div>
+          <div class="wizard-indicator" data-step="3">3</div>
+          <div class="wizard-indicator-line"></div>
+          <div class="wizard-indicator" data-step="4">4</div>
+        </div>
+
+        <!-- Step 1: Server basics -->
+        <div class="wizard-step" id="wizard-step-1" style="display:block">
+          <h3>🏠 Your Server</h3>
+          <p>Everything is already running. Here's what was set up automatically:</p>
+          <div class="wizard-checklist">
+            <div class="wizard-check">✅ SSL certificates generated (encrypted connections)</div>
+            <div class="wizard-check">✅ Database created</div>
+            <div class="wizard-check">✅ Security keys generated</div>
+            <div class="wizard-check">✅ Admin account created (that's you!)</div>
+          </div>
+          <div class="wizard-info-box">
+            <strong>Your server name:</strong>
+            <input type="text" id="wizard-server-name" class="wizard-input" value="Haven" placeholder="e.g. My Server, The Hideout">
+            <span class="wizard-hint">This is what your friends see in their server list.</span>
+          </div>
+        </div>
+
+        <!-- Step 2: Create first channel -->
+        <div class="wizard-step" id="wizard-step-2" style="display:none">
+          <h3>📢 Create Your First Channel</h3>
+          <p>Channels are where conversations happen. Create one to get started.</p>
+          <div class="wizard-info-box">
+            <strong>Channel name:</strong>
+            <input type="text" id="wizard-channel-name" class="wizard-input" value="General" placeholder="e.g. General, Gaming, Hangout">
+            <span class="wizard-hint">You can create more channels later from the sidebar.</span>
+          </div>
+          <div id="wizard-channel-result" style="display:none">
+            <div class="wizard-check" id="wizard-channel-created">✅ Channel created!</div>
+            <div class="wizard-code-display">
+              <span>Invite code:</span>
+              <code id="wizard-channel-code"></code>
+              <button id="wizard-copy-code" class="wizard-btn-small">Copy</button>
+            </div>
+            <span class="wizard-hint">Share this code with friends so they can join this channel.</span>
+          </div>
+        </div>
+
+        <!-- Step 3: Connectivity check -->
+        <div class="wizard-step" id="wizard-step-3" style="display:none">
+          <h3>🌐 Internet Access</h3>
+          <p>Want friends outside your WiFi to connect? Let's check if your server is reachable from the internet.</p>
+          <div id="wizard-port-checking" style="display:none">
+            <div class="wizard-spinner"></div>
+            <span>Checking port reachability...</span>
+          </div>
+          <div id="wizard-port-result" style="display:none"></div>
+          <button id="wizard-check-port-btn" class="wizard-btn-secondary">🔍 Check My Connection</button>
+          <div class="wizard-info-box" style="margin-top:16px">
+            <span class="wizard-hint"><strong>LAN only?</strong> If your friends are on the same WiFi, you can skip this — it will work automatically.</span>
+          </div>
+        </div>
+
+        <!-- Step 4: You're ready -->
+        <div class="wizard-step" id="wizard-step-4" style="display:none">
+          <h3>🎉 You're All Set!</h3>
+          <p>Haven is running and ready for your friends.</p>
+          <div class="wizard-checklist">
+            <div class="wizard-check">✅ Server configured</div>
+            <div class="wizard-check" id="wizard-summary-channel">✅ First channel created</div>
+            <div class="wizard-check" id="wizard-summary-port">⏭️ Port check skipped</div>
+          </div>
+          <div class="wizard-info-box">
+            <strong>How friends join:</strong>
+            <ol class="wizard-steps-list">
+              <li>They open <code id="wizard-final-url">https://YOUR_IP:3000</code> in their browser</li>
+              <li>Click "Advanced" → "Proceed" on the certificate warning</li>
+              <li>Register a username and password</li>
+              <li>Enter the channel invite code you share with them</li>
+            </ol>
+          </div>
+          <div class="wizard-info-box">
+            <span class="wizard-hint">💡 <strong>Tip:</strong> You can always access settings with the ⚙️ gear icon in the sidebar. This wizard won't show again.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="wizard-footer">
+        <button id="wizard-back-btn" class="wizard-btn-secondary" style="display:none">← Back</button>
+        <div style="flex:1"></div>
+        <button id="wizard-skip-btn" class="wizard-btn-text">Skip Setup</button>
+        <button id="wizard-next-btn" class="wizard-btn-primary">Next →</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Channel Code Settings Modal (Admin) -->
   <div class="modal-overlay" id="code-settings-modal" style="display:none">
     <div class="modal">

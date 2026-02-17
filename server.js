@@ -395,6 +395,82 @@ app.get('/api/version', (req, res) => {
   res.json({ version: pkg.version });
 });
 
+// ── Port reachability check (Admin only) ─────────────────
+// Uses external services to test if this server is reachable from the internet.
+// Returns { reachable: bool, publicIp: string|null, error: string|null }
+app.get('/api/port-check', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  const user = token ? verifyToken(token) : null;
+  if (!user || !user.isAdmin) return res.status(403).json({ error: 'Admin only' });
+
+  const port = process.env.PORT || 3000;
+  const https = require('https');
+  const http = require('http');
+
+  // Step 1: Get public IP
+  let publicIp = null;
+  try {
+    publicIp = await new Promise((resolve, reject) => {
+      const req = https.get('https://api.ipify.org?format=json', { timeout: 5000 }, (resp) => {
+        let data = '';
+        resp.on('data', chunk => data += chunk);
+        resp.on('end', () => {
+          try { resolve(JSON.parse(data).ip); }
+          catch { reject(new Error('Bad response')); }
+        });
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+    });
+  } catch {
+    return res.json({ reachable: false, publicIp: null, error: 'Could not determine public IP. You may be offline.' });
+  }
+
+  // Step 2: Check if port is reachable via external probe
+  let reachable = false;
+  try {
+    reachable = await new Promise((resolve, reject) => {
+      const url = `https://portchecker.io/api/v1/query?host=${publicIp}&ports=${port}`;
+      const req = https.get(url, { timeout: 10000 }, (resp) => {
+        let data = '';
+        resp.on('data', chunk => data += chunk);
+        resp.on('end', () => {
+          try {
+            const result = JSON.parse(data);
+            // portchecker.io returns { host, ports: [{ port, status }] }
+            const portResult = result.ports?.find(p => p.port === parseInt(port));
+            resolve(portResult?.status === 'open');
+          } catch { resolve(false); }
+        });
+      });
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => { req.destroy(); resolve(false); });
+    });
+  } catch {
+    // Fallback: try to connect to ourselves from public IP
+    try {
+      const proto = useSSL ? https : http;
+      reachable = await new Promise((resolve) => {
+        const req = proto.get(`${useSSL ? 'https' : 'http'}://${publicIp}:${port}/api/health`, {
+          timeout: 5000,
+          rejectUnauthorized: false
+        }, (resp) => {
+          let data = '';
+          resp.on('data', chunk => data += chunk);
+          resp.on('end', () => {
+            try { resolve(JSON.parse(data).status === 'online'); }
+            catch { resolve(false); }
+          });
+        });
+        req.on('error', () => resolve(false));
+        req.on('timeout', () => { req.destroy(); resolve(false); });
+      });
+    } catch { reachable = false; }
+  }
+
+  res.json({ reachable, publicIp, error: null });
+});
+
 // ── Upload rate limiting ─────────────────────────────────
 const uploadLimitStore = new Map();
 function uploadLimiter(req, res, next) {

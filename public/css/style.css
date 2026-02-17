@@ -4074,6 +4074,323 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   margin-top: 20px;
 }
 
+/* ═══════════════════════════════════════════════════════════
+   SETUP WIZARD
+   ═══════════════════════════════════════════════════════════ */
+
+.modal-wizard {
+  max-width: 560px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.wizard-header {
+  text-align: center;
+  padding: 32px 28px 20px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.wizard-hex {
+  font-size: 2.5rem;
+  display: block;
+  margin-bottom: 8px;
+  filter: drop-shadow(0 0 12px var(--accent-glow, rgba(124,92,252,0.3)));
+}
+
+.wizard-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.wizard-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.wizard-steps {
+  padding: 24px 28px;
+  min-height: 280px;
+}
+
+.wizard-step-indicators {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin-bottom: 24px;
+}
+
+.wizard-indicator {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--bg-hover, #2c2f4a);
+  border: 2px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+}
+
+.wizard-indicator.active {
+  background: var(--accent, #7c5cfc);
+  border-color: var(--accent, #7c5cfc);
+  color: #fff;
+  box-shadow: 0 0 12px var(--accent-glow, rgba(124,92,252,0.4));
+}
+
+.wizard-indicator.done {
+  background: var(--green, #43b581);
+  border-color: var(--green, #43b581);
+  color: #fff;
+}
+
+.wizard-indicator-line {
+  width: 32px;
+  height: 2px;
+  background: var(--border-light);
+  margin: 0 4px;
+}
+
+.wizard-step h3 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.wizard-step > p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  line-height: 1.6;
+}
+
+.wizard-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.wizard-check {
+  font-size: 13px;
+  color: var(--text-primary);
+  padding: 8px 12px;
+  background: var(--bg-hover, rgba(255,255,255,0.03));
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+}
+
+.wizard-info-box {
+  background: var(--bg-hover, rgba(255,255,255,0.03));
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.wizard-info-box strong {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.wizard-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-input, #15172a);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.wizard-input:focus {
+  border-color: var(--accent, #7c5cfc);
+  box-shadow: 0 0 0 2px var(--accent-glow, rgba(124,92,252,0.2));
+}
+
+.wizard-hint {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim, #5d6180);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
+.wizard-code-display {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-input, #15172a);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+
+.wizard-code-display span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.wizard-code-display code {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent, #7c5cfc);
+  letter-spacing: 0.1em;
+  flex: 1;
+}
+
+.wizard-btn-small {
+  background: var(--bg-hover, #2c2f4a);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.wizard-btn-small:hover {
+  background: var(--accent, #7c5cfc);
+  color: #fff;
+}
+
+.wizard-steps-list {
+  margin: 8px 0 0 20px;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.8;
+}
+
+.wizard-steps-list code {
+  background: var(--bg-input, #15172a);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.wizard-footer {
+  display: flex;
+  align-items: center;
+  padding: 16px 28px;
+  border-top: 1px solid var(--border-light);
+  gap: 8px;
+}
+
+.wizard-btn-primary {
+  background: var(--accent, #7c5cfc);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.wizard-btn-primary:hover {
+  filter: brightness(1.15);
+  transform: translateY(-1px);
+}
+
+.wizard-btn-secondary {
+  background: var(--bg-hover, #2c2f4a);
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.wizard-btn-secondary:hover {
+  background: var(--bg-active, #333660);
+}
+
+.wizard-btn-text {
+  background: none;
+  border: none;
+  color: var(--text-dim, #5d6180);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 8px 12px;
+  transition: color 0.15s ease;
+  font-family: inherit;
+}
+
+.wizard-btn-text:hover {
+  color: var(--text-primary);
+}
+
+.wizard-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-light);
+  border-top-color: var(--accent, #7c5cfc);
+  border-radius: 50%;
+  animation: wizard-spin 0.7s linear infinite;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+
+@keyframes wizard-spin {
+  to { transform: rotate(360deg); }
+}
+
+.wizard-port-success {
+  padding: 12px;
+  background: rgba(67, 181, 129, 0.1);
+  border: 1px solid rgba(67, 181, 129, 0.3);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.wizard-port-fail {
+  padding: 12px;
+  background: rgba(240, 71, 71, 0.08);
+  border: 1px solid rgba(240, 71, 71, 0.25);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.wizard-port-fail ol {
+  margin: 8px 0 0 20px;
+  line-height: 1.8;
+}
+
+.wizard-port-fail code {
+  background: var(--bg-input, #15172a);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
 
 /* ═══════════════════════════════════════════════════════════
    CHAT IMAGES
