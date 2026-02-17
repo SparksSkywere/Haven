@@ -5,7 +5,7 @@
 
 > **Your server. Your rules. No cloud. No accounts with Big Tech. No one reading your messages.**
 
-![Version](https://img.shields.io/badge/version-1.8.0-blue)
+![Version](https://img.shields.io/badge/version-1.8.2-blue)
 ![License](https://img.shields.io/badge/license-MIT--NC-green)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
@@ -32,14 +32,13 @@ Open `https://localhost:3000` → Register with username `admin` → Create a ch
 
 ## Quick Start — Windows (No Docker)
 
-1. Install **[Node.js](https://nodejs.org/)** (click the big green **LTS** button, next through the installer)
-2. **Restart your PC** (required for Node.js to be usable)
-3. Download and unzip this repository
-4. Double-click **`Start Haven.bat`**
+1. Download and unzip this repository
+2. Double-click **`Start Haven.bat`**
+3. If Node.js isn't installed, the script will offer to install it for you automatically
 
-That's it. The batch file automatically installs dependencies, generates SSL certificates, creates your config file, and opens your browser. You'll see the login page — register as `admin` to get started.
+That's it. The batch file handles everything — Node.js installation, dependencies, SSL certificates, config — and opens your browser. Register as `admin` to get started.
 
-> **Node.js is the only thing you install manually.** Everything else is handled for you on first launch.
+> **Don't have Node.js?** No problem. The launcher detects this and can install it for you with one keypress. Or install it yourself from [nodejs.org](https://nodejs.org/) and restart your PC.
 
 ## Quick Start — Linux / macOS (No Docker)
 
@@ -242,7 +241,7 @@ Access admin controls in the **Settings** panel (⚙️ gear icon in the sidebar
 | Problem | Fix |
 |---------|-----|
 | "SSL_ERROR_RX_RECORD_TOO_LONG" | Your browser is using `https://` but the server is running HTTP. **Change the URL to `http://localhost:3000`**, or install OpenSSL and restart to enable HTTPS (see below). |
-| "Node.js is not installed" | Install from [nodejs.org](https://nodejs.org/). Restart PC. |
+| "Node.js is not installed" | The launcher offers to install it automatically. Or run `winget install OpenJS.NodeJS.LTS` in a terminal, restart, and try again. |
 | Browser shows blank page | Clear cache or try incognito/private window |
 | Friends can't connect | Check port forwarding + firewall. Make sure server is running. |
 | "Error: EADDRINUSE" | Another app is using port 3000. Change `PORT` in `.env`. |
