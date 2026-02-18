@@ -878,6 +878,21 @@ class HavenApp {
     }
 
     msgInput.addEventListener('keydown', (e) => {
+      // If emoji dropdown is visible, hijack arrow keys, enter, tab, escape
+      const emojiDd = document.getElementById('emoji-dropdown');
+      if (emojiDd && emojiDd.style.display !== 'none') {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          this._navigateEmojiDropdown(e.key === 'ArrowDown' ? 1 : -1);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          const active = emojiDd.querySelector('.emoji-ac-item.active');
+          if (active) { e.preventDefault(); active.click(); return; }
+        }
+        if (e.key === 'Escape') { this._hideEmojiDropdown(); return; }
+      }
+
       // If slash dropdown is visible, hijack arrow keys and enter
       const slashDd = document.getElementById('slash-dropdown');
       if (slashDd && slashDd.style.display !== 'none') {
@@ -934,6 +949,8 @@ class HavenApp {
 
       // Check for @mention trigger
       this._checkMentionTrigger();
+      // Check for :emoji autocomplete trigger
+      this._checkEmojiTrigger();
       // Check for /command trigger
       this._checkSlashTrigger();
     });
@@ -9688,6 +9705,122 @@ class HavenApp {
     input.selectionStart = input.selectionEnd = this.mentionStart + username.length + 2;
     input.focus();
     this._hideMentionDropdown();
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // EMOJI AUTOCOMPLETE  (:name)
+  // ═══════════════════════════════════════════════════════
+
+  _checkEmojiTrigger() {
+    const input = document.getElementById('message-input');
+    const text = input.value;
+    const cursor = input.selectionStart;
+
+    // Walk backwards from cursor to find a ':' that starts a potential emoji token
+    let colonIdx = -1;
+    for (let i = cursor - 1; i >= 0; i--) {
+      const ch = text[i];
+      if (ch === ':') { colonIdx = i; break; }
+      if (ch === ' ' || ch === '\n') break; // stop at whitespace
+    }
+
+    if (colonIdx === -1) { this._hideEmojiDropdown(); return; }
+
+    const query = text.substring(colonIdx + 1, cursor).toLowerCase();
+    if (query.length < 2) { this._hideEmojiDropdown(); return; }
+
+    this._emojiColonStart = colonIdx;
+    this._showEmojiDropdown(query);
+  }
+
+  _showEmojiDropdown(query) {
+    const dd = document.getElementById('emoji-dropdown');
+    dd.innerHTML = '';
+
+    let results = [];
+
+    // Custom emojis first
+    if (this.customEmojis) {
+      this.customEmojis.forEach(em => {
+        if (em.name.toLowerCase().includes(query)) {
+          results.push({ type: 'custom', name: em.name, url: em.url });
+        }
+      });
+    }
+
+    // Standard emojis by name/keyword
+    if (this.emojiNames) {
+      for (const [name, char] of this.emojiNames) {
+        if (name.includes(query)) {
+          results.push({ type: 'standard', name, char });
+        }
+        if (results.length >= 20) break;
+      }
+    }
+
+    results = results.slice(0, 10);
+    if (!results.length) { this._hideEmojiDropdown(); return; }
+
+    results.forEach((r, i) => {
+      const item = document.createElement('div');
+      item.className = 'emoji-ac-item' + (i === 0 ? ' active' : '');
+      const preview = document.createElement('span');
+      preview.className = 'emoji-ac-preview';
+      if (r.type === 'custom') {
+        const img = document.createElement('img');
+        img.src = r.url;
+        img.alt = r.name;
+        img.style.width = '20px'; img.style.height = '20px';
+        preview.appendChild(img);
+      } else {
+        preview.classList.add('emoji-ac-preview-char');
+        preview.textContent = r.char;
+      }
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'emoji-ac-name';
+      nameSpan.textContent = ':' + r.name + ':';
+      item.appendChild(preview);
+      item.appendChild(nameSpan);
+      item.addEventListener('click', () => {
+        if (r.type === 'custom') {
+          this._insertEmojiAc(':' + r.name + ':');
+        } else {
+          this._insertEmojiAc(r.char);
+        }
+      });
+      dd.appendChild(item);
+    });
+
+    dd.style.display = 'block';
+  }
+
+  _hideEmojiDropdown() {
+    const dd = document.getElementById('emoji-dropdown');
+    if (dd) dd.style.display = 'none';
+  }
+
+  _navigateEmojiDropdown(dir) {
+    const dd = document.getElementById('emoji-dropdown');
+    const items = dd.querySelectorAll('.emoji-ac-item');
+    if (!items.length) return;
+    let idx = -1;
+    items.forEach((it, i) => { if (it.classList.contains('active')) idx = i; });
+    items.forEach(it => it.classList.remove('active'));
+    idx += dir;
+    if (idx < 0) idx = items.length - 1;
+    if (idx >= items.length) idx = 0;
+    items[idx].classList.add('active');
+    items[idx].scrollIntoView({ block: 'nearest' });
+  }
+
+  _insertEmojiAc(insert) {
+    const input = document.getElementById('message-input');
+    const before = input.value.substring(0, this._emojiColonStart);
+    const after = input.value.substring(input.selectionStart);
+    input.value = before + insert + ' ' + after;
+    input.selectionStart = input.selectionEnd = this._emojiColonStart + insert.length + 1;
+    input.focus();
+    this._hideEmojiDropdown();
   }
 
   // ═══════════════════════════════════════════════════════
