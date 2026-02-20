@@ -135,6 +135,7 @@ class HavenApp {
     this._setupGifPicker();
     this._startStatusBar();
     this._setupMobile();
+    this._setupIOSKeyboard();
     this._setupMobileBridge();
     this._setupStatusPicker();
     this._setupFileUpload();
@@ -2583,6 +2584,44 @@ class HavenApp {
     const overlay = document.getElementById('mobile-overlay');
     appBody.classList.remove('mobile-sidebar-open', 'mobile-right-open');
     overlay.classList.remove('active');
+  }
+
+  /* ── iOS PWA Keyboard Layout Fix ────────────────────── */
+  // iOS standalone PWA doesn't reliably shrink the viewport when the
+  // virtual keyboard opens.  We use the visualViewport API to detect
+  // the keyboard height and apply a CSS custom property so the layout
+  // can compensate.
+
+  _setupIOSKeyboard() {
+    if (!window.visualViewport) return;
+
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
+      navigator.standalone === true;
+
+    // Only needed for iOS standalone PWA (browsers handle it natively)
+    if (!isIOS && !isStandalone) return;
+
+    const app = document.getElementById('app');
+    const messages = document.getElementById('messages');
+
+    const onViewportResize = () => {
+      const kbHeight = window.innerHeight - window.visualViewport.height;
+      // Only apply when keyboard is actually open (threshold avoids toolbar jitter)
+      if (kbHeight > 50) {
+        app.style.height = window.visualViewport.height + 'px';
+        document.body.classList.add('ios-keyboard-open');
+        // Scroll messages to bottom so user sees latest while typing
+        if (messages) requestAnimationFrame(() => messages.scrollTop = messages.scrollHeight);
+      } else {
+        app.style.height = '';
+        document.body.classList.remove('ios-keyboard-open');
+      }
+    };
+
+    window.visualViewport.addEventListener('resize', onViewportResize);
+    window.visualViewport.addEventListener('scroll', onViewportResize);
   }
 
   /* ── Mobile App Bridge (Capacitor shell ↔ Haven) ───── */

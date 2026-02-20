@@ -7290,6 +7290,20 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
 
 
 /* ═══════════════════════════════════════════════════════════
+   iOS PWA KEYBOARD FIX
+   When the virtual keyboard opens on iOS standalone PWA,
+   the viewport doesn't shrink.  JS detects this via
+   visualViewport and sets #app height directly; this CSS
+   removes the safe-area bottom padding so the input sits
+   flush above the keyboard.
+   ═══════════════════════════════════════════════════════════ */
+
+.ios-keyboard-open .message-input-area {
+  padding-bottom: 6px !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
    TOUCH & ACCESSIBILITY
    ═══════════════════════════════════════════════════════════ */
 
