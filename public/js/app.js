@@ -9777,26 +9777,22 @@ class HavenApp {
         const channelName = nameInput?.value?.trim() || 'General';
 
         // Listen for channel creation result
-        const handler = (data) => {
-          if (data.channels) {
-            // Find the newly created channel (last one)
-            const newest = data.channels[data.channels.length - 1];
-            if (newest && newest.code) {
-              this._wizardChannelCode = newest.code;
-              const resultDiv = document.getElementById('wizard-channel-result');
-              const codeEl = document.getElementById('wizard-channel-code');
-              if (resultDiv) resultDiv.style.display = 'block';
-              if (codeEl) codeEl.textContent = newest.code;
-              nameInput.disabled = true;
-              // Auto-advance to step 3 after channel is created
-              this._wizardStep = 3;
-              this._wizardUpdateUI();
-            }
+        const handler = (channel) => {
+          if (channel && channel.code) {
+            this._wizardChannelCode = channel.code;
+            const resultDiv = document.getElementById('wizard-channel-result');
+            const codeEl = document.getElementById('wizard-channel-code');
+            if (resultDiv) resultDiv.style.display = 'block';
+            if (codeEl) codeEl.textContent = channel.code;
+            nameInput.disabled = true;
+            // Auto-advance to step 3 after channel is created
+            this._wizardStep = 3;
+            this._wizardUpdateUI();
           }
-          this.socket.off('channels', handler);
+          this.socket.off('channel-created', handler);
         };
-        this.socket.on('channels', handler);
-        this.socket.emit('create-channel', channelName);
+        this.socket.on('channel-created', handler);
+        this.socket.emit('create-channel', { name: channelName });
       } else {
         this._wizardStep = 3;
         this._wizardUpdateUI();
