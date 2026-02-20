@@ -9929,15 +9929,15 @@ class HavenApp {
       }
       this._refreshTunnelStatus();
 
-      // Server invite code (live state, not part of Save/Cancel flow)
-      const serverCodeEl = document.getElementById('server-code-value');
-      if (serverCodeEl) {
-        const code = this.serverSettings.server_code;
-        serverCodeEl.textContent = code || '—';
-        serverCodeEl.style.opacity = code ? '1' : '0.4';
-      }
-
       if (typeof this._renderPermThresholds === 'function') this._renderPermThresholds();
+    }
+
+    // Server invite code — always update even while modal is open (live action, not Save flow)
+    const serverCodeEl = document.getElementById('server-code-value');
+    if (serverCodeEl) {
+      const code = this.serverSettings.server_code;
+      serverCodeEl.textContent = code || '—';
+      serverCodeEl.style.opacity = code ? '1' : '0.4';
     }
 
     // Always update visual branding regardless of modal state
