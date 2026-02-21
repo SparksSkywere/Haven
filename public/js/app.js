@@ -300,6 +300,11 @@ class HavenApp {
       if (this.voice && this.voice.inVoice && this.voice.currentChannel) {
         this.socket.emit('voice-rejoin', { code: this.voice.currentChannel });
       }
+      // Apply any queued status change from when we were disconnected
+      if (this._pendingStatus) {
+        this.socket.emit('set-status', this._pendingStatus);
+        this._pendingStatus = null;
+      }
     });
     document.addEventListener('visibilitychange', () => {
       this.socket?.emit('visibility-change', { visible: !document.hidden });
@@ -10614,7 +10619,13 @@ class HavenApp {
         const statusText = document.getElementById('status-text-input').value.trim();
         // Track whether user manually chose a non-online status (away/dnd/invisible)
         this._manualStatusOverride = (status !== 'online');
-        this.socket.emit('set-status', { status, statusText });
+        if (!this.socket?.connected) {
+          // Queue status change for when socket reconnects
+          this._pendingStatus = { status, statusText };
+          this._showToast('Status will update when reconnected', 'info');
+        } else {
+          this.socket.emit('set-status', { status, statusText });
+        }
         picker.style.display = 'none';
       });
     });
@@ -10637,7 +10648,26 @@ class HavenApp {
 
   _toggleStatusPicker() {
     const picker = document.getElementById('status-picker');
-    picker.style.display = picker.style.display === 'none' ? 'block' : 'none';
+    const dot = document.getElementById('user-status-dot');
+    if (picker.style.display !== 'none' && picker.style.display !== '') {
+      picker.style.display = 'none';
+      return;
+    }
+    // Position the fixed picker relative to the status dot
+    if (dot) {
+      const rect = dot.getBoundingClientRect();
+      picker.style.left = rect.left + 'px';
+      // Open above or below depending on space
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if (spaceBelow > 220) {
+        picker.style.top = (rect.bottom + 4) + 'px';
+        picker.style.bottom = 'auto';
+      } else {
+        picker.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+        picker.style.top = 'auto';
+      }
+    }
+    picker.style.display = 'block';
   }
 
   _updateStatusPickerUI() {

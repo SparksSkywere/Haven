@@ -6865,12 +6865,20 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   height: 40px;
   background: transparent;
   color: var(--text-secondary);
+  border: none;
   border-radius: var(--radius-sm);
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   transition: all var(--transition);
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Ensure mobile buttons are visible immediately on small screens
+   (avoids race where media queries in responsive section load late) */
+@media (max-width: 768px) {
+  .mobile-menu-btn,
+  .mobile-users-btn { display: flex !important; }
 }
 
 .mobile-menu-btn:hover,
@@ -7024,7 +7032,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   }
 
   .channel-info h3 { font-size: 14px; }
-  .channel-code-tag { display: none; }
+  .channel-code-tag { font-size: 10px; padding: 1px 6px; }
 
   /* Voice buttons — smaller on tablet */
   .btn-voice { padding: 5px 10px; font-size: 12px; }
@@ -7035,6 +7043,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   #search-toggle-btn,
   #pinned-toggle-btn,
   #copy-code-btn { display: none !important; }
+  .header-actions-divider { display: none; }
 
   /* Voice join moves to right sidebar on mobile */
   #voice-join-btn { display: none !important; }
@@ -7105,7 +7114,8 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
     gap: 4px;
   }
 
-  .channel-info h3 { font-size: 13px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-info h3 { font-size: 13px; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-code-tag { font-size: 9px; padding: 1px 5px; max-width: 70px; overflow: hidden; text-overflow: ellipsis; }
 
   /* Update banner — compact on phone */
   .update-banner { padding: 3px 8px; font-size: 11px; }
@@ -8677,18 +8687,18 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
 }
 
 .status-picker {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
+  position: fixed;
+  left: 10px;
+  right: auto;
+  bottom: auto;
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 6px 0;
-  min-width: 180px;
-  z-index: 500;
+  min-width: 200px;
+  width: 220px;
+  z-index: 600;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-  margin-top: 4px;
 }
 
 .status-option {
