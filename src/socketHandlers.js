@@ -3610,7 +3610,7 @@ function setupSocketHandlers(io, db) {
     // ═══════════════ ROLE MANAGEMENT ═════════════════════════
 
     socket.on('get-roles', (data, callback) => {
-      const roles = db.prepare('SELECT *, auto_assign FROM roles ORDER BY level DESC').all();
+      const roles = db.prepare('SELECT * FROM roles ORDER BY level DESC').all();
       const permissions = db.prepare('SELECT * FROM role_permissions').all();
       const permMap = {};
       permissions.forEach(p => {
@@ -3742,43 +3742,56 @@ function setupSocketHandlers(io, db) {
       const role = db.prepare('SELECT * FROM roles WHERE id = ?').get(roleId);
       if (!role) return cb({ error: 'Role not found' });
 
-      const updates = [];
-      const values = [];
+      // Run the entire role update inside a transaction so the auto_assign
+      // clear + set is atomic and can't leave the DB in a half-updated state.
+      const updateRoleTx = db.transaction(() => {
+        const updates = [];
+        const values = [];
 
-      if (isString(data.name, 1, 30)) { updates.push('name = ?'); values.push(data.name.trim()); }
-      if (isInt(data.level) && data.level >= 1 && data.level <= 99) { updates.push('level = ?'); values.push(data.level); }
-      if (data.color !== undefined) { updates.push('color = ?'); values.push(data.color || null); }
-      if (data.autoAssign !== undefined) {
-        // If enabling auto-assign, clear all other roles' auto_assign first
-        if (data.autoAssign) {
-          db.prepare('UPDATE roles SET auto_assign = 0').run();
+        if (isString(data.name, 1, 30)) { updates.push('name = ?'); values.push(data.name.trim()); }
+        if (isInt(data.level) && data.level >= 1 && data.level <= 99) { updates.push('level = ?'); values.push(data.level); }
+        if (data.color !== undefined) { updates.push('color = ?'); values.push(data.color || null); }
+        if (data.autoAssign !== undefined) {
+          if (data.autoAssign) {
+            db.prepare('UPDATE roles SET auto_assign = 0').run();
+          }
+          updates.push('auto_assign = ?'); values.push(data.autoAssign ? 1 : 0);
         }
-        updates.push('auto_assign = ?'); values.push(data.autoAssign ? 1 : 0);
-      }
 
-      if (updates.length > 0) {
-        values.push(roleId);
-        db.prepare(`UPDATE roles SET ${updates.join(', ')} WHERE id = ?`).run(...values);
-      }
+        if (updates.length > 0) {
+          values.push(roleId);
+          db.prepare(`UPDATE roles SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+        }
 
-      // Update permissions
-      if (Array.isArray(data.permissions)) {
-        const validPerms = [
-          'kick_user', 'mute_user', 'ban_user', 'delete_message', 'delete_own_messages',
-          'delete_lower_messages', 'edit_own_messages', 'pin_message', 'set_channel_topic',
-          'manage_sub_channels', 'rename_channel', 'rename_sub_channel',
-          'upload_files', 'use_voice', 'manage_webhooks', 'mention_everyone', 'view_history',
-          'promote_user', 'transfer_admin'
-        ];
-        db.prepare('DELETE FROM role_permissions WHERE role_id = ?').run(roleId);
-        const insertPerm = db.prepare('INSERT INTO role_permissions (role_id, permission, allowed) VALUES (?, ?, 1)');
-        data.permissions.forEach(p => { if (validPerms.includes(p)) insertPerm.run(roleId, p); });
-      }
+        // Update permissions
+        if (Array.isArray(data.permissions)) {
+          const validPerms = [
+            'kick_user', 'mute_user', 'ban_user', 'delete_message', 'delete_own_messages',
+            'delete_lower_messages', 'edit_own_messages', 'pin_message', 'set_channel_topic',
+            'manage_sub_channels', 'rename_channel', 'rename_sub_channel',
+            'upload_files', 'use_voice', 'manage_webhooks', 'mention_everyone', 'view_history',
+            'promote_user', 'transfer_admin'
+          ];
+          db.prepare('DELETE FROM role_permissions WHERE role_id = ?').run(roleId);
+          const insertPerm = db.prepare('INSERT INTO role_permissions (role_id, permission, allowed) VALUES (?, ?, 1)');
+          data.permissions.forEach(p => { if (validPerms.includes(p)) insertPerm.run(roleId, p); });
+        }
+      });
+      updateRoleTx();
+
+      // Return the full refreshed role list so the saving client gets
+      // authoritative data without needing a second round-trip.
+      const freshRoles = db.prepare('SELECT * FROM roles ORDER BY level DESC').all();
+      const perms = db.prepare('SELECT * FROM role_permissions').all();
+      const pm = {};
+      perms.forEach(p => { if (!pm[p.role_id]) pm[p.role_id] = []; pm[p.role_id].push(p.permission); });
+      freshRoles.forEach(r => { r.permissions = pm[r.id] || []; });
 
       // Refresh all online users' role data
       for (const [code] of channelUsers) { emitOnlineUsers(code); }
-      io.emit('roles-updated');
-      cb({ success: true });
+      // Notify OTHER connected admins (not the saving socket — they get data in the callback)
+      socket.broadcast.emit('roles-updated');
+      cb({ success: true, roles: freshRoles });
     });
 
     socket.on('delete-role', (data, callback) => {

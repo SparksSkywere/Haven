@@ -6999,7 +6999,7 @@ class HavenApp {
     if (!this.voice.inVoice) return;
 
     if (this.voice.isScreenSharing) {
-      this.voice.stopScreenShare();
+      await this.voice.stopScreenShare();
       document.getElementById('screen-share-btn').textContent = '🖥️';
       document.getElementById('screen-share-btn').title = 'Share Screen';
       document.getElementById('screen-share-btn').classList.remove('sharing');
@@ -11675,6 +11675,9 @@ class HavenApp {
 
     document.getElementById('save-role-btn').addEventListener('click', () => {
       const perms = [...panel.querySelectorAll('.role-perm-checkbox:checked')].map(cb => cb.dataset.perm);
+      const saveBtn = document.getElementById('save-role-btn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
       this.socket.emit('update-role', {
         roleId: role.id,
         name: document.getElementById('role-edit-name').value.trim(),
@@ -11683,9 +11686,22 @@ class HavenApp {
         autoAssign: document.getElementById('role-edit-auto-assign').checked,
         permissions: perms
       }, (res) => {
-        if (res.error) { this._showToast(res.error, 'error'); return; }
-        this._showToast('Role updated', 'success');
-        this._loadRoles();
+        if (res.error) { this._showToast(res.error, 'error'); saveBtn.disabled = false; saveBtn.textContent = 'Save'; return; }
+        // Use server-returned roles directly (no re-fetch needed)
+        if (res.roles) {
+          this._allRoles = res.roles;
+          this._renderRolesPreview();
+          if (document.getElementById('role-modal').style.display !== 'none') {
+            this._renderRoleSidebar();
+            this._renderRoleDetail();
+          }
+        } else {
+          this._loadRoles();
+        }
+        // Flash the save button green briefly as confirmation
+        saveBtn.textContent = '✓ Saved';
+        saveBtn.classList.add('btn-saved');
+        setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.classList.remove('btn-saved'); saveBtn.disabled = false; }, 1200);
       });
     });
 

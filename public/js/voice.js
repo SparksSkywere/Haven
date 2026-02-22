@@ -435,7 +435,7 @@ class VoiceManager {
     }
   }
 
-  stopScreenShare() {
+  async stopScreenShare() {
     if (!this.isScreenSharing || !this.screenStream) return;
 
     const tracks = this.screenStream.getTracks();
@@ -443,6 +443,7 @@ class VoiceManager {
     // Remove screen tracks from all peer connections FIRST, then stop them.
     // Stopping tracks before all peers have removed them causes renegotiation
     // to reference dead tracks and corrupt audio.
+    const renegotiations = [];
     for (const [userId, peer] of this.peers) {
       const senders = peer.connection.getSenders();
       tracks.forEach(track => {
@@ -451,9 +452,17 @@ class VoiceManager {
           try { peer.connection.removeTrack(sender); } catch {}
         }
       });
-      // Renegotiate
-      this._renegotiate(userId, peer.connection).catch(() => {});
+      // Renegotiate and track the promise so we can wait for completion
+      renegotiations.push(this._renegotiate(userId, peer.connection).catch(() => {}));
     }
+
+    // Wait for all renegotiations to complete (with a timeout so we don't hang forever)
+    try {
+      await Promise.race([
+        Promise.all(renegotiations),
+        new Promise(resolve => setTimeout(resolve, 3000))
+      ]);
+    } catch { /* proceed anyway */ }
 
     // Now safe to stop tracks — all peers have detached them
     tracks.forEach(t => t.stop());
@@ -472,11 +481,47 @@ class VoiceManager {
   setScreenResolution(h) {
     this.screenResolution = h;   // 720 | 1080 | 1440 | 0 = source
     localStorage.setItem('haven_screen_res', h);
+    if (this.isScreenSharing) this._applyLiveQualityChange();
   }
 
   setScreenFrameRate(fps) {
     this.screenFrameRate = fps;  // 15 | 30 | 60
     localStorage.setItem('haven_screen_fps', fps);
+    if (this.isScreenSharing) this._applyLiveQualityChange();
+  }
+
+  /**
+   * Apply resolution / framerate / bitrate changes to an active screen share
+   * without stopping and restarting the stream.
+   */
+  async _applyLiveQualityChange() {
+    if (!this.screenStream) return;
+    const videoTrack = this.screenStream.getVideoTracks()[0];
+    if (!videoTrack) return;
+
+    const res = this.screenResolution;
+    const fps = this.screenFrameRate;
+
+    // Apply new constraints to the live capture track
+    const constraints = {};
+    if (res && res !== 0) {
+      const widths = { 720: 1280, 1080: 1920, 1440: 2560 };
+      constraints.width = { ideal: widths[res] || 1920 };
+      constraints.height = { ideal: res };
+    }
+    constraints.frameRate = { ideal: fps };
+
+    try {
+      await videoTrack.applyConstraints(constraints);
+    } catch (e) {
+      console.warn('applyConstraints failed (browser may not support live constraint changes):', e);
+    }
+
+    // Update bitrate cap on all peer senders
+    const maxBitrate = this._screenBitrates[res] || this._screenBitrates[0];
+    for (const [, peer] of this.peers) {
+      this._applyScreenBitrate(peer.connection, maxBitrate);
+    }
   }
 
   /**
@@ -553,11 +598,12 @@ class VoiceManager {
         track.onunmute = () => {
           // Create a fresh MediaStream so the video element detects a new srcObject
           // (re-assigning the same object is a no-op in Chrome → black screen).
-          // Small delay lets the track start producing frames before the UI grabs it.
+          // Uses the track directly rather than videoStream.getTracks() to handle
+          // transceiver reuse where the old stream ref may be stale.
           setTimeout(() => {
-            const freshStream = new MediaStream(videoStream.getTracks());
+            const freshStream = new MediaStream([track]);
             if (this.onScreenStream) this.onScreenStream(userId, freshStream);
-          }, 120);
+          }, 150);
         };
         track.onmute = () => {
           // Track temporarily stopped sending — force video to re-render
