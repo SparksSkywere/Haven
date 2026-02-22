@@ -172,8 +172,7 @@ The default data directory locations are:
 
 | Operating System | Location |
 |:---|:---|
-| Windows | `%APPDATA%\Haven\` (typically `C:\Users\YourName\AppData\Roaming\Haven\`) |
-| Linux and macOS | `~/.haven/` |
+| All (Portable) | `./data/` (relative to the Haven application directory) |
 | Docker | `/data` inside the container (mapped to a volume or host folder) |
 
 You can override this location by setting the **HAVEN_DATA_DIR** environment variable in your `.env` file or your system environment before starting the server.
@@ -383,7 +382,7 @@ You can tell whether Haven is running in HTTPS or HTTP mode by looking at the st
 
 If Haven falls back to HTTP mode, it means that SSL certificate generation failed, usually because OpenSSL is not installed. For local-only use, HTTP mode works perfectly well. However, voice chat will only function on localhost in HTTP mode because browsers require a secure context for WebRTC microphone access, and push notifications will not work over plain HTTP either.
 
-To install OpenSSL on Windows, download it from [slproweb.com/products/Win32OpenSSL.html](https://slproweb.com/products/Win32OpenSSL.html). Choose the "Light" version. During installation, select the option labelled "Copy OpenSSL DLLs to the Windows system directory." After installation, restart your computer so that OpenSSL is added to the system PATH. Then delete the certs folder inside your data directory (`%APPDATA%\Haven\certs` on Windows) and restart Haven. The server will regenerate the certificates and start in HTTPS mode.
+To install OpenSSL on Windows, download it from [slproweb.com/products/Win32OpenSSL.html](https://slproweb.com/products/Win32OpenSSL.html). Choose the "Light" version. During installation, select the option labelled "Copy OpenSSL DLLs to the Windows system directory." After installation, restart your computer so that OpenSSL is added to the system PATH. Then delete the certs folder inside your data directory (`./data/certs`) and restart Haven. The server will regenerate the certificates and start in HTTPS mode.
 
 On Linux, OpenSSL is almost always pre-installed. On macOS, it is available through Xcode Command Line Tools or through Homebrew with `brew install openssl`.
 
@@ -950,7 +949,7 @@ The following keyboard shortcuts are available throughout the Haven interface.
 
 Since all of Haven's data resides in the data directory, which is separate from the application code, backing up your server is straightforward. Simply copy the entire data directory to a safe location.
 
-On Windows, the data directory is at `%APPDATA%\Haven\`. On Linux and macOS, it is at `~/.haven/`. For Docker installations, data is either in a Docker volume named haven_data or in the host directory you mapped in your docker-compose.yml configuration.
+The data directory is at `./data/`. For Docker installations, data is either in a Docker volume named haven_data or in the host directory you mapped in your docker-compose.yml configuration.
 
 The data directory contains everything you need to fully restore your server: the SQLite database (haven.db) with all messages, user accounts, channels, roles, and settings; the .env configuration file; the SSL certificates in the certs subdirectory; and all uploaded files in the uploads subdirectory. The Haven application directory contains no personal data whatsoever and can be replaced by downloading a fresh copy of the code.
 
@@ -1014,7 +1013,7 @@ This typically happens when SSL certificates were not generated on first launch,
 
 The quickest fix is to change the URL in your browser from `https://` to `http://` (keeping the same host and port). If the server is running in HTTP mode, it can only respond to http:// requests.
 
-For a permanent fix, install OpenSSL so that Haven can generate SSL certificates. On Windows, download OpenSSL from [slproweb.com/products/Win32OpenSSL.html](https://slproweb.com/products/Win32OpenSSL.html) and choose the Light version. During installation, make sure to select "Copy OpenSSL DLLs to the Windows system directory." After installation is complete, restart your computer so that OpenSSL is added to the system PATH. Then navigate to your Haven data directory and delete the certs folder entirely (the path is `%APPDATA%\Haven\certs` on Windows). Restart Haven by running Start Haven.bat again. The server will detect that certificates are missing, generate new ones using the now-available OpenSSL, and start in HTTPS mode.
+For a permanent fix, install OpenSSL so that Haven can generate SSL certificates. On Windows, download OpenSSL from [slproweb.com/products/Win32OpenSSL.html](https://slproweb.com/products/Win32OpenSSL.html) and choose the Light version. During installation, make sure to select "Copy OpenSSL DLLs to the Windows system directory." After installation is complete, restart your computer so that OpenSSL is added to the system PATH. Then navigate to your Haven data directory and delete the certs folder entirely (the path is `./data/certs`). Restart Haven by running Start Haven.bat again. The server will detect that certificates are missing, generate new ones using the now-available OpenSSL, and start in HTTPS mode.
 
 To verify which mode your server is running in, check the startup output in the terminal window. The URL printed there indicates whether Haven is using http:// or https://.
 

@@ -1,3 +1,4 @@
+# Haven .gitignore
 node_modules/
 haven.db
 haven.db-shm
@@ -7,8 +8,8 @@ certs/
 public/uploads/*
 !public/uploads/.gitkeep
 
-# Data directory (should never be in the project, but just in case)
-uploads
+# Data directory (portable)
+data/
 __Scanner__/
 
 # OS junk
@@ -21,8 +22,6 @@ Desktop.ini
 *.swp
 *.swo
 *~
-.vs/
-
 .vs/
 
 # Flash game ROMs (optional download  not shipped with Haven)

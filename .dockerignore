@@ -15,6 +15,9 @@ certs/
 public/uploads/*
 !public/uploads/.gitkeep
 
+# Data directory (portable)
+data/
+
 # Repo / editor files
 .git/
 .gitignore

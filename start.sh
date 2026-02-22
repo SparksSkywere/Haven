@@ -14,8 +14,8 @@ BOLD='\033[1m'
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
-# ── Data directory (~/.haven) ──────────────────────────────
-HAVEN_DATA="${HAVEN_DATA_DIR:-$HOME/.haven}"
+# ── Data directory (./data) ──────────────────────────────
+HAVEN_DATA="${HAVEN_DATA_DIR:-$DIR/data}"
 mkdir -p "$HAVEN_DATA"
 
 echo ""
@@ -26,18 +26,18 @@ echo ""
 
 # ── Pre-read PORT from project .env so we kill the right process ──
 HAVEN_PORT=3000
-if [ -f "$DIR/.env" ]; then
-    while IFS='=' read -r key value; do
-        case "$key" in
-            PORT) HAVEN_PORT="$value" ;;
-        esac
-    done < "$DIR/.env"
-elif [ -f "$HAVEN_DATA/.env" ]; then
+if [ -f "$HAVEN_DATA/.env" ]; then
     while IFS='=' read -r key value; do
         case "$key" in
             PORT) HAVEN_PORT="$value" ;;
         esac
     done < "$HAVEN_DATA/.env"
+elif [ -f "$DIR/.env" ]; then
+    while IFS='=' read -r key value; do
+        case "$key" in
+            PORT) HAVEN_PORT="$value" ;;
+        esac
+    done < "$DIR/.env"
 fi
 
 # ── Kill existing server on configured port ────────────────

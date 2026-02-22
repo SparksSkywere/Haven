@@ -7,8 +7,8 @@ echo       HAVEN - Private Chat Server
 echo  ========================================
 echo.
 
-:: ── Data directory (%APPDATA%\Haven) ──────────────────────
-set "HAVEN_DATA=%APPDATA%\Haven"
+:: ── Data directory (portable: .\data) ──────────────────────
+set "HAVEN_DATA=%~dp0data"
 if not exist "%HAVEN_DATA%" mkdir "%HAVEN_DATA%"
 
 :: Kill any existing Haven server on the configured port
@@ -16,10 +16,10 @@ echo  [*] Checking for existing server...
 
 :: ── Pre-read PORT from project .env so we kill the right process ──
 set "HAVEN_PORT=3000"
-if exist "%~dp0.env" (
-    for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%~dp0.env") do if "%%A"=="PORT" set "HAVEN_PORT=%%B"
-) else if exist "%HAVEN_DATA%\.env" (
+if exist "%HAVEN_DATA%\.env" (
     for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%HAVEN_DATA%\.env") do if "%%A"=="PORT" set "HAVEN_PORT=%%B"
+) else if exist "%~dp0.env" (
+    for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%~dp0.env") do if "%%A"=="PORT" set "HAVEN_PORT=%%B"
 )
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%HAVEN_PORT%" ^| findstr "LISTENING"') do (
     echo  [!] Killing existing process on port %HAVEN_PORT%

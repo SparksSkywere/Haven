@@ -8,10 +8,10 @@ echo       HAVEN - Stop Server
 echo  ========================================
 echo.
 
-set "HAVEN_DATA=%APPDATA%\Haven"
+set "HAVEN_DATA=%~dp0data"
 set "HAVEN_PORT=3000"
-if exist "%~dp0.env" for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%~dp0.env") do if "%%A"=="PORT" set "HAVEN_PORT=%%B"
-if not exist "%~dp0.env" if exist "%HAVEN_DATA%\.env" for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%HAVEN_DATA%\.env") do if "%%A"=="PORT" set "HAVEN_PORT=%%B"
+if exist "%HAVEN_DATA%\.env" for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%HAVEN_DATA%\.env") do if "%%A"=="PORT" set "HAVEN_PORT=%%B"
+if not exist "%HAVEN_DATA%\.env" if exist "%~dp0.env" for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%~dp0.env") do if "%%A"=="PORT" set "HAVEN_PORT=%%B"
 
 :: ── Try saved PID first (written by Start Haven.bat) ──────
 set "FOUND=0"

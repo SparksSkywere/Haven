@@ -800,15 +800,14 @@ The changes done will make sure everything here fits what I want specifically, o
 
 ### Data Isolation
 
-All user data now lives **outside** the Haven code directory, making it physically impossible to accidentally commit or share personal data.
+All user data now lives in a `data/` subdirectory within the Haven application directory for portability.
 
 ### Changed
 - **Database, .env, certs, and uploads** are now stored in:
-  - **Windows:** `%APPDATA%\Haven\`
-  - **Linux / macOS:** `~/.haven/`
+  - **All systems:** `./data/` (relative to the Haven application directory)
 - **SSL certificates are auto-detected** — if certs exist in the data directory, HTTPS enables automatically without needing to edit `.env`.
-- **Start Haven.bat** and **start.sh** generate certs and bootstrap `.env` in the external data directory.
-- **Automatic one-time migration** — existing data in the old project-directory locations is moved to the new data directory on first launch.
+- **Start Haven.bat** and **start.sh** generate certs and bootstrap `.env` in the data directory.
+- **Automatic one-time migration** — existing data in the old locations is moved to the new data directory on first launch.
 
 ### Added
 - New `src/paths.js` module — single source of truth for all data directory paths.
