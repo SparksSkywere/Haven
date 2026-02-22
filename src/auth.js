@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
+// Removed unused import: jwt
+// Removed unused import: crypto
 const { getDb } = require('./database');
 
 const router = express.Router();
@@ -10,7 +10,6 @@ if (!JWT_SECRET) {
   console.error('FATAL: JWT_SECRET is not set. Check your .env file or let server.js auto-generate it.');
   process.exit(1);
 }
-const ADMIN_USERNAME = (process.env.ADMIN_USERNAME || 'admin').toLowerCase();
 
 // ── Rate Limiting (in-memory, no extra deps) ────────────
 const rateLimitStore = new Map();
@@ -73,14 +72,11 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'You must confirm that you are 18 years of age or older' });
     }
 
-    if (!username || !password) {
-      return res.status(400).json({ error: 'Username and password required' });
-    }
     if (username.length < 3 || username.length > 20) {
       return res.status(400).json({ error: 'Username must be 3-20 characters' });
     }
-    if (password.length < 8 || password.length > 128) {
-      return res.status(400).json({ error: 'Password must be 8-128 characters' });
+    if (password.length < 8 || password.length > 1024) {
+      return res.status(400).json({ error: 'Password must be 8-1024 characters' });
     }
     if (!/^[a-zA-Z0-9_]+$/.test(username)) {
       return res.status(400).json({ error: 'Username: letters, numbers, underscores only' });
@@ -99,11 +95,14 @@ router.post('/register', async (req, res) => {
 
     const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
     if (existing) {
-      return res.status(400).json({ error: 'Registration could not be completed' });
+      return res.status(409).json({ error: 'Username is already taken' });
     }
 
     const hash = await bcrypt.hash(password, 12);
-    const isAdmin = username.toLowerCase() === ADMIN_USERNAME ? 1 : 0;
+
+    // Discord-style: the very first user to register becomes the server owner (admin)
+    const userCount = db.prepare('SELECT COUNT(*) as cnt FROM users').get();
+    const isAdmin = userCount.cnt === 0 ? 1 : 0;
 
     const result = db.prepare(
       'INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)'
@@ -112,11 +111,20 @@ router.post('/register', async (req, res) => {
     // Auto-assign roles flagged as auto_assign to new users
     try {
       const autoRoles = db.prepare("SELECT id FROM roles WHERE auto_assign = 1 AND scope = 'server'").all();
-      const insertRole = db.prepare('INSERT OR IGNORE INTO user_roles (user_id, role_id, channel_id, granted_by) VALUES (?, ?, NULL, NULL)');
-      for (const role of autoRoles) {
-        insertRole.run(result.lastInsertRowid, role.id);
+      if (autoRoles.length > 0) {
+        const insertRole = db.prepare('INSERT OR IGNORE INTO user_roles (user_id, role_id, channel_id, granted_by) VALUES (?, ?, NULL, NULL)');
+        const assignAll = db.transaction(() => {
+          for (const role of autoRoles) {
+            insertRole.run(result.lastInsertRowid, role.id);
+          }
+        });
+        assignAll();
       }
     } catch { /* non-critical */ }
+
+    // Discord-style: DO NOT auto-join channels on registration
+    // Users start with empty sidebar and must join a server via invite link
+    // This matches Discord where you need to create a server or use an invite to get channels
 
     const token = jwt.sign(
       { id: result.lastInsertRowid, username, isAdmin: !!isAdmin, displayName: username },
@@ -162,7 +170,7 @@ router.post('/login', async (req, res) => {
     }
 
     const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+    const user = db.prepare('SELECT id, username, password_hash, is_admin, display_name FROM users WHERE username = ?').get(username);
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -177,13 +185,6 @@ router.post('/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
       return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    // Sync admin status from .env (handles ADMIN_USERNAME changes between restarts)
-    const shouldBeAdmin = user.username.toLowerCase() === ADMIN_USERNAME ? 1 : 0;
-    if (user.is_admin !== shouldBeAdmin) {
-      db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(shouldBeAdmin, user.id);
-      user.is_admin = shouldBeAdmin;
     }
 
     const displayName = user.display_name || user.username;
@@ -230,12 +231,12 @@ router.post('/change-password', async (req, res) => {
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: 'Current and new password required' });
     }
-    if (newPassword.length < 8 || newPassword.length > 128) {
-      return res.status(400).json({ error: 'New password must be 8-128 characters' });
+    if (newPassword.length < 8 || newPassword.length > 1024) {
+      return res.status(400).json({ error: 'New password must be 8-1024 characters' });
     }
 
     const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(decoded.id);
+    const user = db.prepare('SELECT id, username, password_hash, is_admin, display_name FROM users WHERE id = ?').get(decoded.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const valid = await bcrypt.compare(currentPassword, user.password_hash);

@@ -1,3 +1,4 @@
+// ...existing code...
 // ── Resolve data directory BEFORE loading .env ────────────
 const { DATA_DIR, DB_PATH, ENV_PATH, CERTS_DIR, UPLOADS_DIR } = require('./src/paths');
 
@@ -52,21 +53,71 @@ const vapidEmail = process.env.VAPID_EMAIL || 'mailto:admin@haven.local';
 webpush.setVapidDetails(vapidEmail, process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
 
 const { initDatabase } = require('./src/database');
-const { router: authRoutes, authLimiter, verifyToken } = require('./src/auth');
+const { router: authRoutes, authLimiter } = require('./src/auth');
 const { setupSocketHandlers } = require('./src/socketHandlers');
 const { startTunnel, stopTunnel, getTunnelStatus, registerProcessCleanup } = require('./src/tunnel');
 
+// ── SSL / HTTP mode detection (needed before helmet) ─────
+let sslCert = process.env.SSL_CERT_PATH;
+let sslKey = process.env.SSL_KEY_PATH;
+
+// If not explicitly configured, check if startup scripts generated certs
+if (!sslCert && !sslKey) {
+  const autoCert = path.join(CERTS_DIR, 'cert.pem');
+  const autoKey = path.join(CERTS_DIR, 'key.pem');
+  if (fs.existsSync(autoCert) && fs.existsSync(autoKey)) {
+    sslCert = autoCert;
+    sslKey = autoKey;
+  }
+} else {
+  // Resolve relative paths against the data directory
+  if (sslCert && !path.isAbsolute(sslCert)) sslCert = path.resolve(DATA_DIR, sslCert);
+  if (sslKey && !path.isAbsolute(sslKey)) sslKey = path.resolve(DATA_DIR, sslKey);
+}
+
+const forceHttp = (process.env.FORCE_HTTP || '').toLowerCase() === 'true';
+const forceHttps = (process.env.FORCE_HTTPS || '').toLowerCase() === 'true';
+const useSSL = !!(sslCert && sslKey && !forceHttp);
+const allowHttp = !forceHttps && (process.env.ALLOW_HTTP || '').toLowerCase() === 'true';
+
+if (forceHttps) {
+  console.log('🔒 FORCE_HTTPS=true — HTTPS only, HTTP blocked');
+}
+
+if (forceHttp) {
+  console.log('⚡ FORCE_HTTP=true — running plain HTTP (reverse proxy mode)');
+}
+
 const app = express();
+
+// ── HTTP to HTTPS redirect middleware ──
+function redirectToHTTPS(req, res, next) {
+  if (!req.secure && req.headers['x-forwarded-proto'] !== 'https') {
+    const host = req.headers.host;
+    return res.redirect(301, `https://${host}${req.url}`);
+  }
+  next();
+}
+// ── Enforce HTTPS for login/register endpoints ────────
+function requireHTTPS(req, res, next) {
+  if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+    return next();
+  }
+  if (req.path === '/login' || req.path === '/register') {
+    return res.status(403).json({ error: 'Authentication must be performed over HTTPS.' });
+  }
+  next();
+}
 
 // ── Security Headers (helmet) ────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'wasm-unsafe-eval'", "https://www.youtube.com", "https://w.soundcloud.com", "https://unpkg.com"],
+        scriptSrc: ["'self'", "https://www.youtube.com", "https://w.soundcloud.com", "https://unpkg.com"],
       styleSrc: ["'self'", "'unsafe-inline'"],  // inline styles needed for themes
       imgSrc: ["'self'", "data:", "blob:", "https:"],  // https: for link preview OG images + GIPHY
-      connectSrc: ["'self'", "ws:", "wss:", "https:"],  // Socket.IO + cross-origin health checks
+        connectSrc: ["'self'", "wss:", "https:"],
       mediaSrc: ["'self'", "blob:", "data:"],  // WebRTC audio + notification sounds
       fontSrc: ["'self'"],
       workerSrc: ["'self'", "blob:", "https://unpkg.com"],  // service worker + Ruffle WebAssembly workers
@@ -79,7 +130,7 @@ app.use(helmet({
   },
   crossOriginEmbedderPolicy: false,  // needed for WebRTC
   crossOriginOpenerPolicy: false,    // needed for WebRTC
-  hsts: (process.env.FORCE_HTTP || '').toLowerCase() === 'true' ? false : { maxAge: 31536000, includeSubDomains: false }, // force HTTPS for 1 year (disabled when FORCE_HTTP=true)
+  hsts: useSSL ? { maxAge: 31536000, includeSubDomains: false } : false, // only set HSTS when HTTPS is active
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }));
 
@@ -147,6 +198,9 @@ const fileUpload = multer({
 });
 
 // ── API routes (rate-limited) ────────────────────────────
+app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/auth/login', requireHTTPS, authLimiter, authRoutes);
+app.use('/api/auth/register', requireHTTPS, authLimiter, authRoutes);
 app.use('/api/auth', authLimiter, authRoutes);
 
 // ── Push notification VAPID public key endpoint ──────────
@@ -469,29 +523,201 @@ app.get('/api/port-check', async (req, res) => {
       req.on('error', () => resolve(false));
       req.on('timeout', () => { req.destroy(); resolve(false); });
     });
-  } catch {
+  try {
     // Fallback: try to connect to ourselves from public IP
-    try {
-      const proto = useSSL ? https : http;
-      reachable = await new Promise((resolve) => {
-        const req = proto.get(`${useSSL ? 'https' : 'http'}://${publicIp}:${port}/api/health`, {
-          timeout: 5000,
-          rejectUnauthorized: false
-        }, (resp) => {
-          let data = '';
-          resp.on('data', chunk => data += chunk);
-          resp.on('end', () => {
-            try { resolve(JSON.parse(data).status === 'online'); }
-            catch { resolve(false); }
-          });
+    const proto = useSSL ? https : http;
+    reachable = await new Promise((resolve) => {
+      const req = proto.get(`${useSSL ? 'https' : 'http'}://${publicIp}:${port}/api/health`, {
+        timeout: 5000,
+        rejectUnauthorized: false
+      }, (resp) => {
+        let data = '';
+        resp.on('data', chunk => data += chunk);
+        resp.on('end', () => {
+          try {
+            const result = JSON.parse(data);
+            resolve(result.status === 'online');
+          } catch { resolve(false); }
         });
-        req.on('error', () => resolve(false));
-        req.on('timeout', () => { req.destroy(); resolve(false); });
       });
-    } catch { reachable = false; }
-  }
-
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => { req.destroy(); resolve(false); });
+    });
+  } catch {}
   res.json({ reachable, publicIp, error: null });
+
+    const guildId = result.lastInsertRowid;
+
+    // Add creator as member
+    db.prepare('INSERT INTO guild_members (guild_id, user_id) VALUES (?, ?)').run(guildId, user.id);
+
+    // Create default general channel
+    const channelCode = generateChannelCode();
+    const channelResult = db.prepare(
+      'INSERT INTO channels (guild_id, name, code, created_by) VALUES (?, ?, ?, ?)'
+    ).run(guildId, 'general', channelCode, user.id);
+
+    // Add creator to the channel
+    db.prepare('INSERT INTO channel_members (channel_id, user_id) VALUES (?, ?)').run(channelResult.lastInsertRowid, user.id);
+
+    res.json({
+      guild: {
+        id: guildId,
+        name,
+        owner_id: user.id,
+        invite_code: inviteCode
+      },
+      channel: {
+        id: channelResult.lastInsertRowid,
+        name: 'general',
+        code: channelCode
+      }
+    });
+  } catch (err) {
+    console.error('Create guild error:', err);
+    res.status(500).json({ error: 'Failed to create guild' });
+  }
+});
+
+// Get user's guilds
+app.get('/api/guilds', (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  const user = token ? verifyToken(token) : null;
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const { getDb } = require('./src/database');
+    const db = getDb();
+    
+    const guilds = db.prepare(`
+      SELECT g.* FROM guilds g
+      INNER JOIN guild_members gm ON g.id = gm.guild_id
+      WHERE gm.user_id = ?
+      ORDER BY g.created_at ASC
+    `).all(user.id);
+
+    res.json({ guilds });
+  } catch (err) {
+    console.error('Get guilds error:', err);
+    res.status(500).json({ error: 'Failed to fetch guilds' });
+  }
+});
+
+// Get guild channels
+app.get('/api/guilds/:guildId/channels', (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  const user = token ? verifyToken(token) : null;
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const { getDb } = require('./src/database');
+    const db = getDb();
+    const guildId = parseInt(req.params.guildId);
+
+    // Check if user is member of guild
+    const member = db.prepare('SELECT 1 FROM guild_members WHERE guild_id = ? AND user_id = ?').get(guildId, user.id);
+    if (!member) return res.status(403).json({ error: 'Not a member of this guild' });
+
+    const channels = db.prepare(`
+      SELECT c.* FROM channels c
+      WHERE c.guild_id = ?
+      ORDER BY c.position, c.created_at
+    `).all(guildId);
+
+    res.json({ channels });
+  } catch (err) {
+    console.error('Get guild channels error:', err);
+    res.status(500).json({ error: 'Failed to fetch channels' });
+  }
+});
+
+// Join guild by invite code
+app.post('/api/guilds/join', express.json(), (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  const user = token ? verifyToken(token) : null;
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const { getDb } = require('./src/database');
+    const db = getDb();
+    
+    const inviteCode = typeof req.body.inviteCode === 'string' ? req.body.inviteCode.trim() : '';
+    if (!inviteCode) return res.status(400).json({ error: 'Invite code required' });
+
+    const guild = db.prepare('SELECT * FROM guilds WHERE invite_code = ?').get(inviteCode);
+    if (!guild) return res.status(404).json({ error: 'Invalid invite code' });
+
+    // Add user to guild
+    try {
+      db.prepare('INSERT INTO guild_members (guild_id, user_id) VALUES (?, ?)').run(guild.id, user.id);
+    } catch {
+      // Already a member
+    }
+
+    // Add user to all public channels in the guild
+    const channels = db.prepare('SELECT id FROM channels WHERE guild_id = ? AND is_private = 0').all(guild.id);
+    for (const channel of channels) {
+      try {
+        db.prepare('INSERT INTO channel_members (channel_id, user_id) VALUES (?, ?)').run(channel.id, user.id);
+      } catch {
+        // Already a member
+      }
+    }
+
+    res.json({ guild, channels });
+  } catch (err) {
+    console.error('Join guild error:', err);
+    res.status(500).json({ error: 'Failed to join guild' });
+  }
+});
+
+// Leave guild
+app.post('/api/guilds/:guildId/leave', express.json(), (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  const user = token ? verifyToken(token) : null;
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const { getDb } = require('./src/database');
+    const db = getDb();
+    const guildId = parseInt(req.params.guildId);
+
+    const guild = db.prepare('SELECT owner_id FROM guilds WHERE id = ?').get(guildId);
+    if (!guild) return res.status(404).json({ error: 'Guild not found' });
+
+    if (guild.owner_id === user.id) {
+      return res.status(400).json({ error: 'Owner cannot leave guild. Transfer ownership or delete the guild.' });
+    }
+
+    db.prepare('DELETE FROM guild_members WHERE guild_id = ? AND user_id = ?').run(guildId, user.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Leave guild error:', err);
+    res.status(500).json({ error: 'Failed to leave guild' });
+  }
+});
+
+// Delete guild (owner only)
+app.delete('/api/guilds/:guildId', (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  const user = token ? verifyToken(token) : null;
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const { getDb } = require('./src/database');
+    const db = getDb();
+    const guildId = parseInt(req.params.guildId);
+
+    const guild = db.prepare('SELECT owner_id FROM guilds WHERE id = ?').get(guildId);
+    if (!guild) return res.status(404).json({ error: 'Guild not found' });
+    if (guild.owner_id !== user.id) return res.status(403).json({ error: 'Only the guild owner can delete it' });
+
+    db.prepare('DELETE FROM guilds WHERE id = ?').run(guildId);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Delete guild error:', err);
+    res.status(500).json({ error: 'Failed to delete guild' });
+  }
 });
 
 // ── Upload rate limiting ─────────────────────────────────
@@ -1630,29 +1856,10 @@ app.use((err, req, res, _next) => {
 // Create HTTP or HTTPS server
 let server;
 
-// Resolve SSL paths: if set in .env resolve relative to DATA_DIR, otherwise auto-detect
-let sslCert = process.env.SSL_CERT_PATH;
-let sslKey  = process.env.SSL_KEY_PATH;
-
-// If not explicitly configured, check if the startup scripts generated certs
-if (!sslCert && !sslKey) {
-  const autoCert = path.join(CERTS_DIR, 'cert.pem');
-  const autoKey  = path.join(CERTS_DIR, 'key.pem');
-  if (fs.existsSync(autoCert) && fs.existsSync(autoKey)) {
-    sslCert = autoCert;
-    sslKey  = autoKey;
-  }
-} else {
-  // Resolve relative paths against the data directory
-  if (sslCert && !path.isAbsolute(sslCert)) sslCert = path.resolve(DATA_DIR, sslCert);
-  if (sslKey  && !path.isAbsolute(sslKey))  sslKey  = path.resolve(DATA_DIR, sslKey);
-}
-
-const forceHttp = (process.env.FORCE_HTTP || '').toLowerCase() === 'true';
-const useSSL = sslCert && sslKey && !forceHttp;
-
-if (forceHttp) {
-  console.log('⚡ FORCE_HTTP=true — running plain HTTP (reverse proxy mode)');
+if (forceHttps && !useSSL) {
+  console.error('FATAL: FORCE_HTTPS=true but SSL certs were not found or failed to load.');
+  console.error('Set SSL_CERT_PATH and SSL_KEY_PATH (or generate certs), then restart.');
+  process.exit(1);
 }
 
 if (useSSL) {
@@ -1664,38 +1871,48 @@ if (useSSL) {
     server = createHttpsServer(sslOptions, app);
     console.log('🔒 HTTPS enabled');
 
-    // Also start an HTTP server that redirects to HTTPS (hardened)
-    const httpRedirect = express();
-    httpRedirect.disable('x-powered-by');
-    // Rate limit redirect server to prevent abuse
-    const redirectHits = new Map();
-    httpRedirect.use((req, res, next) => {
-      const ip = req.ip || req.socket.remoteAddress;
-      const now = Date.now();
-      if (!redirectHits.has(ip)) redirectHits.set(ip, []);
-      const stamps = redirectHits.get(ip).filter(t => now - t < 60000);
-      redirectHits.set(ip, stamps);
-      if (stamps.length > 60) return res.status(429).end('Rate limited');
-      stamps.push(now);
-      next();
-    });
-    setInterval(() => { const now = Date.now(); for (const [ip, t] of redirectHits) { const f = t.filter(x => now - x < 60000); if (!f.length) redirectHits.delete(ip); else redirectHits.set(ip, f); } }, 5 * 60 * 1000);
-    // Only redirect to our own host — prevent open redirect
     const safePort = parseInt(process.env.PORT || 3000);
-    httpRedirect.all('*', (req, res) => {
-      // Sanitize: only allow path portion, strip host manipulation
-      const safePath = (req.url || '/').replace(/[\r\n]/g, '');
-      const host = (req.headers.host || `localhost:${safePort}`).replace(/:\d+$/, '') + ':' + safePort;
-      res.redirect(301, `https://${host}${safePath}`);
-    });
-    const HTTP_REDIRECT_PORT = safePort + 1; // 3001
-    const httpRedirectServer = createServer(httpRedirect);
-    // Timeout to prevent Slowloris on redirect server
-    httpRedirectServer.headersTimeout = 5000;
-    httpRedirectServer.requestTimeout = 5000;
-    httpRedirectServer.listen(HTTP_REDIRECT_PORT, process.env.HOST || '0.0.0.0', () => {
-      console.log(`↪️  HTTP redirect running on port ${HTTP_REDIRECT_PORT} → HTTPS`);
-    });
+    const httpPort = parseInt(process.env.HTTP_PORT || (safePort + 1));
+
+    if (allowHttp) {
+      const httpServer = createServer(app);
+      httpServer.headersTimeout = 15000;
+      httpServer.requestTimeout = 30000;
+      httpServer.listen(httpPort, process.env.HOST || '0.0.0.0', () => {
+        console.log(`🌐 HTTP enabled on port ${httpPort} (no redirect)`);
+      });
+    } else {
+      // Start an HTTP server that redirects to HTTPS (hardened)
+      const httpRedirect = express();
+      httpRedirect.disable('x-powered-by');
+      // Rate limit redirect server to prevent abuse
+      const redirectHits = new Map();
+      httpRedirect.use((req, res, next) => {
+        const ip = req.ip || req.socket.remoteAddress;
+        const now = Date.now();
+        if (!redirectHits.has(ip)) redirectHits.set(ip, []);
+        const stamps = redirectHits.get(ip).filter(t => now - t < 60000);
+        redirectHits.set(ip, stamps);
+        if (stamps.length > 60) return res.status(429).end('Rate limited');
+        stamps.push(now);
+        next();
+      });
+      setInterval(() => { const now = Date.now(); for (const [ip, t] of redirectHits) { const f = t.filter(x => now - x < 60000); if (!f.length) redirectHits.delete(ip); else redirectHits.set(ip, f); } }, 5 * 60 * 1000);
+      // Only redirect to our own host — prevent open redirect
+      httpRedirect.all('*', (req, res) => {
+        // Sanitize: only allow path portion, strip host manipulation
+        const safePath = (req.url || '/').replace(/[\r\n]/g, '');
+        const host = (req.headers.host || `localhost:${safePort}`).replace(/:\d+$/, '') + ':' + safePort;
+        res.redirect(301, `https://${host}${safePath}`);
+      });
+      const httpRedirectServer = createServer(httpRedirect);
+      // Timeout to prevent Slowloris on redirect server
+      httpRedirectServer.headersTimeout = 5000;
+      httpRedirectServer.requestTimeout = 5000;
+      httpRedirectServer.listen(httpPort, process.env.HOST || '0.0.0.0', () => {
+        console.log(`↪️  HTTP redirect running on port ${httpPort} → HTTPS`);
+      });
+    }
   } catch (err) {
     console.error('Failed to load SSL certs, falling back to HTTP:', err.message);
     server = createServer(app);

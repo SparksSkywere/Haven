@@ -26,14 +26,7 @@
 
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⬡</text></svg>">
 
-  <!-- Google tag (gtag.js) -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=AW-17950126697"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-    gtag('config', 'AW-17950126697');
-  </script>
+  <!-- No analytics — Haven does not phone home -->
 
   <style>
     /* ============================================
@@ -668,7 +661,7 @@
   <nav>
     <div class="nav-inner">
       <div class="nav-brand"><span class="hex">⬡</span> HAVEN</div>
-      <button class="nav-mobile-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')" aria-label="Toggle menu">☰</button>
+      <button class="nav-mobile-toggle" id="nav-toggle-btn" aria-label="Toggle menu">☰</button>
       <ul class="nav-links">
         <li><a href="#features">Features</a></li>
         <li><a href="#how-it-works">How It Works</a></li>
@@ -728,21 +721,21 @@
   <section class="discord-banner fade-in" id="discord-import">
     <div class="discord-banner-inner">
       <div class="container">
-        <h2>🚀 NEW &mdash; Import your <span class="discord-blue">Discord</span> history</h2>
+        <h2>NEW &mdash; Import your <span class="discord-blue">Discord</span> history</h2>
         <p>
           Leaving Discord? Bring everything with you. Haven&nbsp;v2.0 imports your entire server &mdash;
           every channel, thread, forum post, reaction, pin, attachment, and avatar &mdash;
           directly from the app. No external tools. No command line. Just paste your token, pick a server, and go.
         </p>
         <div class="discord-features">
-          <span class="discord-feat">💬 Text channels</span>
-          <span class="discord-feat">📢 Announcements</span>
-          <span class="discord-feat">💬 Forums &amp; tags</span>
-          <span class="discord-feat">🧵 Threads</span>
-          <span class="discord-feat">😀 Reactions</span>
-          <span class="discord-feat">📌 Pins</span>
-          <span class="discord-feat">📎 Attachments</span>
-          <span class="discord-feat">🖼️ Avatars</span>
+          <span class="discord-feat">Text channels</span>
+          <span class="discord-feat">Announcements</span>
+          <span class="discord-feat">Forums &amp; tags</span>
+          <span class="discord-feat">Threads</span>
+          <span class="discord-feat">Reactions</span>
+          <span class="discord-feat">Pins</span>
+          <span class="discord-feat">Attachments</span>
+          <span class="discord-feat">Avatars</span>
           <span class="discord-feat">↩️ Replies</span>
         </div>
       </div>
@@ -1163,29 +1156,33 @@
       </div>
 
       <div class="download-card fade-in">
-        <h2>Haven v2.2.1</h2>
+        <h2>Haven v2.2.2</h2>
         <p class="download-version">Latest stable release &middot; Windows, macOS &amp; Linux &middot; ~5 MB</p>
 
         <div class="download-btn-group">
-          <a href="https://github.com/ancsemi/Haven/archive/refs/tags/v2.2.1.zip" class="btn btn-primary download-main">
-            <span class="icon">⬇</span> Download v2.2.1 (.zip)
+          <a href="https://github.com/ancsemi/Haven/archive/refs/tags/v2.2.2.zip" class="btn btn-primary download-main">
+            <span class="icon">⬇</span> Download v2.2.2 (.zip)
           </a>
           <div class="download-alt-links">
             <a href="https://github.com/ancsemi/Haven" target="_blank">&#9965; View on GitHub</a>
-            <a href="https://github.com/ancsemi/Haven/blob/main/GUIDE.md" target="_blank">📖 Setup Guide</a>
-            <a href="https://github.com/ancsemi/Haven/blob/main/CHANGELOG.md" target="_blank">📋 Full Changelog</a>
+            <a href="https://github.com/ancsemi/Haven/blob/main/GUIDE.md" target="_blank">Setup Guide</a>
+            <a href="https://github.com/ancsemi/Haven/blob/main/CHANGELOG.md" target="_blank">Full Changelog</a>
           </div>
         </div>
 
         <div class="version-history">
-          <button class="version-toggle" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open');">
+          <button class="version-toggle">
             <span>Version History</span>
             <span class="arrow">▼</span>
           </button>
           <div class="version-list">
             <div class="version-list-inner">
               <div class="version-item">
-                <div><span class="v-name">v2.2.1</span><span class="v-tag latest">Latest</span></div>
+                <div><span class="v-name">v2.2.2</span><span class="v-tag latest">Latest</span></div>
+                <a href="https://github.com/ancsemi/Haven/archive/refs/tags/v2.2.2.zip">Download &rarr;</a>
+              </div>
+              <div class="version-item">
+                <div><span class="v-name">v2.2.1</span> &mdash; Mobile UI fixes, TURN credential fix, file upload fix</div>
                 <a href="https://github.com/ancsemi/Haven/archive/refs/tags/v2.2.1.zip">Download &rarr;</a>
               </div>
               <div class="version-item">
@@ -1326,7 +1323,7 @@
         <h2>Support Haven</h2>
         <p>Haven is built by one person in their spare time and will always be free. If it's useful to you, a small donation helps keep development going.</p>
         <a href="https://ko-fi.com/ancsemi" target="_blank" class="btn btn-donate">
-          ☕ Buy me a coffee on Ko-fi
+          Buy me a coffee on Ko-fi
         </a>
         <p class="support-note">Ko-fi takes zero fees &mdash; 100% goes to the developer. No account required to donate.</p>
       </div>
@@ -1359,6 +1356,18 @@
     });
     window.addEventListener('scroll', () => {
       document.querySelector('nav').style.background = window.scrollY > 100 ? 'rgba(21, 23, 42, 0.97)' : 'rgba(21, 23, 42, 0.85)';
+    });
+
+    // Mobile nav toggle
+    document.getElementById('nav-toggle-btn')?.addEventListener('click', () => {
+      document.querySelector('.nav-links').classList.toggle('open');
+    });
+    // Version history toggle
+    document.querySelectorAll('.version-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.classList.toggle('open');
+        btn.nextElementSibling.classList.toggle('open');
+      });
     });
 
     // Hero image carousel

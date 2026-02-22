@@ -1,7 +1,10 @@
 // Apply saved theme immediately to prevent flash of unstyled content
 (function() {
-  var t = localStorage.getItem('haven_theme');
-  if (t) document.documentElement.setAttribute('data-theme', t);
+  console.log('Theme init starting...');
+  var t = localStorage.getItem('haven_theme') || 'haven';
+  console.log('Applying theme:', t);
+  document.documentElement.setAttribute('data-theme', t);
+  console.log('Theme applied to document element');
   // Apply effect overlay system (stackable) — always strip theme pseudo-element effects
   document.documentElement.setAttribute('data-fx-custom', '');
   var fxRaw = localStorage.getItem('haven_effects') || 'auto';
@@ -54,4 +57,5 @@
   if (t === 'rgb') {
     document.documentElement.setAttribute('data-theme', 'haven');
   }
+  console.log('Theme init complete');
 })();

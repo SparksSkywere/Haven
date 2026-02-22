@@ -34,12 +34,9 @@ class VoiceManager {
     this._noiseGateGain = null;
     this._noiseGateAnalyser = null;
 
-    this.rtcConfig = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
-    };
+    // No default STUN servers — keeps all traffic local.
+    // Server provides ICE config (including TURN if configured).
+    this.rtcConfig = { iceServers: [] };
 
     // Fetch server-provided ICE config (may include TURN)
     this._fetchIceServers();
@@ -60,11 +57,11 @@ class VoiceManager {
         const data = await res.json();
         if (data.iceServers && data.iceServers.length) {
           this.rtcConfig.iceServers = data.iceServers;
-          console.log(`🧊 ICE servers loaded (${data.iceServers.length} servers${data.iceServers.some(s => String(s.urls).includes('turn:')) ? ', TURN enabled' : ''})`);
+ console.debug(`ICE servers loaded (${data.iceServers.length} servers${data.iceServers.some(s => String(s.urls).includes('turn:')) ? ', TURN enabled': ''})`);
         }
       }
     } catch (err) {
-      console.warn('Could not fetch ICE servers, using defaults:', err.message);
+ console.warn('Could not fetch ICE servers, using defaults:', err.message);
     }
   }
 
@@ -114,7 +111,7 @@ class VoiceManager {
           answer: answer
         });
       } catch (err) {
-        console.error('Error handling voice offer:', err);
+ console.error('Error handling voice offer:', err);
       }
     });
 
@@ -129,7 +126,7 @@ class VoiceManager {
             await peer.connection.setRemoteDescription(new RTCSessionDescription(data.answer));
           }
         } catch (err) {
-          console.error('Error handling voice answer:', err);
+ console.error('Error handling voice answer:', err);
         }
       }
     });
@@ -141,7 +138,7 @@ class VoiceManager {
         try {
           await peer.connection.addIceCandidate(new RTCIceCandidate(data.candidate));
         } catch (err) {
-          console.error('Error adding ICE candidate:', err);
+ console.error('Error adding ICE candidate:', err);
         }
       }
     });
@@ -263,7 +260,7 @@ class VoiceManager {
 
       return true;
     } catch (err) {
-      console.error('Microphone access failed:', err);
+ console.error('Microphone access failed:', err);
       return false;
     }
   }
@@ -395,7 +392,7 @@ class VoiceManager {
 
       return true;
     } catch (err) {
-      console.error('Screen share failed:', err);
+ console.error('Screen share failed:', err);
       this.isScreenSharing = false;
       this.screenStream = null;
       return false;
@@ -444,7 +441,7 @@ class VoiceManager {
         offer: offer
       });
     } catch (err) {
-      console.error('Renegotiation failed:', err);
+ console.error('Renegotiation failed:', err);
     }
   }
 
@@ -577,7 +574,7 @@ class VoiceManager {
           offer: offer
         });
       } catch (err) {
-        console.error('Error creating voice offer:', err);
+ console.error('Error creating voice offer:', err);
       }
     }
   }
@@ -606,7 +603,7 @@ class VoiceManager {
         offer: offer
       });
     } catch (err) {
-      console.error('ICE restart failed for', userId, '— removing peer:', err);
+ console.error('ICE restart failed for', userId, '— removing peer:', err);
       this._removePeer(userId);
     }
   }

@@ -22,7 +22,7 @@ services:
       - PORT=${PORT:-3000}
       - HOST=0.0.0.0
       # - SERVER_NAME=My Haven           # Name shown in the UI
-      # - ADMIN_USERNAME=admin            # First account to register becomes admin
+      # First user to register becomes server owner/admin automatically
       # - GIPHY_API_KEY=                  # Optional: enable GIF search
       # - VAPID_EMAIL=mailto:you@example  # Optional: email for push notifications
       # - TURN_URL=turn:your-server:3478  # Optional: TURN relay for voice over internet

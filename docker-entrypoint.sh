@@ -7,9 +7,9 @@ CERTS="$DATA/certs"
 # Auto-generate self-signed SSL certs if none exist (skip if FORCE_HTTP=true)
 # (HTTPS is needed for voice chat to work over the network)
 if [ "${FORCE_HTTP:-false}" = "true" ]; then
-  echo "⚡ FORCE_HTTP=true — skipping SSL certificate generation"
+  echo "FORCE_HTTP=true — skipping SSL certificate generation"
 elif [ ! -f "$CERTS/cert.pem" ] || [ ! -f "$CERTS/key.pem" ]; then
-  echo "🔐 Generating self-signed SSL certificate..."
+  echo "Generating self-signed SSL certificate..."
   mkdir -p "$CERTS"
   openssl req -x509 -newkey rsa:2048 \
     -keyout "$CERTS/key.pem" \
@@ -19,7 +19,7 @@ elif [ ! -f "$CERTS/cert.pem" ] || [ ! -f "$CERTS/key.pem" ]; then
     -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
     2>/dev/null
   chown node:node "$CERTS/cert.pem" "$CERTS/key.pem" 2>/dev/null || true
-  echo "✅ SSL certificate created"
+  echo "SSL certificate created"
 fi
 
 # Fix ownership on bind-mounted volumes (Synology / NAS friendly)

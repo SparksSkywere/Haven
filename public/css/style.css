@@ -2,7 +2,21 @@
    HAVEN — Multi-Theme Stylesheet
    Themes: Haven (default), Discord, Matrix, Tron, HALO, LoTR
    ═══════════════════════════════════════════════════════════ */
-@import url('https://fonts.googleapis.com/css2?family=VT323&family=Share+Tech+Mono&display=swap');
+/* ─── Self-hosted fonts (no external CDN calls) ──────── */
+@font-face {
+  font-family: 'VT323';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/VT323.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Share Tech Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/ShareTechMono.woff2') format('woff2');
+}
 
 /* ─── THEME: Haven (Default) ───────────────────────────── */
 :root, [data-theme="haven"] {
@@ -172,7 +186,7 @@
 
 /* Tron accent overrides — identity disc glow */
 [data-theme="tron"] .brand-text { text-shadow: 0 0 10px rgba(111, 236, 255, 0.4); color: #6fecff; }
-[data-theme="tron"] .server-icon.home { background: transparent; border: 2px solid #6fecff; box-shadow: 0 0 8px rgba(111, 236, 255, 0.4); }
+[data-theme="tron"] .guild-icon.home { background: transparent; border: 2px solid #6fecff; box-shadow: 0 0 8px rgba(111, 236, 255, 0.4); }
 [data-theme="tron"] .channel-item.active::before { background: #6fecff; box-shadow: 0 0 6px rgba(111, 236, 255, 0.5); }
 [data-theme="tron"] .btn-send { box-shadow: 0 0 8px rgba(111, 236, 255, 0.3); }
 [data-theme="tron"] .message-avatar, [data-theme="tron"] .message-avatar-img { border: 1px solid rgba(111, 236, 255, 0.25); }
@@ -223,8 +237,8 @@
 [data-theme="halo"] .reaction-badge.own { background: rgba(79, 195, 247, 0.2); border-color: #4fc3f7; }
 [data-theme="halo"] .reaction-badge:hover { background: rgba(79, 195, 247, 0.15); border-color: #4fc3f7; }
 [data-theme="halo"] .channel-badge { background: #4fc3f7; }
-[data-theme="halo"] .server-icon.home { background: linear-gradient(135deg, #4ca64c, #d4a020); }
-[data-theme="halo"] .server-icon:hover { background: #4fc3f7; }
+[data-theme="halo"] .guild-icon.home { background: linear-gradient(135deg, #4ca64c, #d4a020); }
+[data-theme="halo"] .guild-icon:hover { background: #4fc3f7; }
 [data-theme="halo"] .brand-text { background: linear-gradient(90deg, #4ca64c, #d4a020, #4fc3f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
 [data-theme="halo"] .inline-code { color: #4fc3f7; }
 
@@ -277,7 +291,7 @@
 /* LoTR accent overrides — elvish warmth */
 [data-theme="lotr"] .brand-text { font-style: italic; }
 [data-theme="lotr"] .welcome-icon { color: #d4a844; }
-[data-theme="lotr"] .server-icon.home { background: linear-gradient(135deg, #8a6a20, #d4a844); }
+[data-theme="lotr"] .guild-icon.home { background: linear-gradient(135deg, #8a6a20, #d4a844); }
 
 /* ─── THEME: Cyberpunk ─────────────────────────────────── */
 [data-theme="cyberpunk"] {
@@ -321,7 +335,7 @@
 [data-theme="cyberpunk"] .channel-item.active::before { background: #00f0ff; }
 [data-theme="cyberpunk"] .inline-code { color: #00f0ff; }
 [data-theme="cyberpunk"] .brand-text { background: linear-gradient(90deg, #ff2d6f, #00f0ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-[data-theme="cyberpunk"] .server-icon.home { background: linear-gradient(135deg, #ff2d6f, #00f0ff); }
+[data-theme="cyberpunk"] .guild-icon.home { background: linear-gradient(135deg, #ff2d6f, #00f0ff); }
 
 /* ─── THEME: Nord ──────────────────────────────────────── */
 [data-theme="nord"] {
@@ -448,7 +462,7 @@
 
 /* Bloodborne accent overrides — blood and darkness */
 [data-theme="bloodborne"] .brand-text { color: #cc0020; text-shadow: 0 0 12px rgba(204, 0, 32, 0.5); }
-[data-theme="bloodborne"] .server-icon.home { background: linear-gradient(135deg, #660010, #cc0020); box-shadow: 0 0 10px rgba(204, 0, 32, 0.4); }
+[data-theme="bloodborne"] .guild-icon.home { background: linear-gradient(135deg, #660010, #cc0020); box-shadow: 0 0 10px rgba(204, 0, 32, 0.4); }
 [data-theme="bloodborne"] .channel-item.active::before { background: #ff0030; box-shadow: 0 0 8px rgba(255, 0, 48, 0.6); }
 [data-theme="bloodborne"] .btn-send { box-shadow: 0 0 8px rgba(204, 0, 32, 0.4); }
 [data-theme="bloodborne"] .message-avatar, [data-theme="bloodborne"] .message-avatar-img { border: 1px solid rgba(204, 0, 32, 0.3); }
@@ -496,7 +510,7 @@
 
 /* Ice accent overrides — frozen glow */
 [data-theme="ice"] .brand-text { color: #00d4ff; text-shadow: 0 0 12px rgba(0, 212, 255, 0.5); }
-[data-theme="ice"] .server-icon.home { background: linear-gradient(135deg, #005580, #00d4ff); box-shadow: 0 0 10px rgba(0, 212, 255, 0.3); }
+[data-theme="ice"] .guild-icon.home { background: linear-gradient(135deg, #005580, #00d4ff); box-shadow: 0 0 10px rgba(0, 212, 255, 0.3); }
 [data-theme="ice"] .channel-item.active::before { background: #00d4ff; box-shadow: 0 0 8px rgba(0, 212, 255, 0.5); }
 [data-theme="ice"] .btn-send { box-shadow: 0 0 8px rgba(0, 212, 255, 0.3); }
 [data-theme="ice"] .message-avatar, [data-theme="ice"] .message-avatar-img { border: 1px solid rgba(0, 212, 255, 0.25); }
@@ -544,7 +558,7 @@
 
 /* Abyss accent overrides — deep ocean pressure */
 [data-theme="abyss"] .brand-text { color: #4488ff; text-shadow: 0 0 12px rgba(26, 90, 255, 0.5); }
-[data-theme="abyss"] .server-icon.home { background: linear-gradient(135deg, #0a2060, #1a5aff); box-shadow: 0 0 10px rgba(26, 90, 255, 0.3); }
+[data-theme="abyss"] .guild-icon.home { background: linear-gradient(135deg, #0a2060, #1a5aff); box-shadow: 0 0 10px rgba(26, 90, 255, 0.3); }
 [data-theme="abyss"] .channel-item.active::before { background: #1a5aff; box-shadow: 0 0 8px rgba(26, 90, 255, 0.5); }
 [data-theme="abyss"] .btn-send { box-shadow: 0 0 8px rgba(26, 90, 255, 0.3); }
 [data-theme="abyss"] .message-avatar, [data-theme="abyss"] .message-avatar-img { border: 1px solid rgba(26, 90, 255, 0.25); }
@@ -591,7 +605,7 @@
 }
 
 [data-theme="darksouls"] .brand-text { color: #c8a84e; text-shadow: 0 0 10px rgba(200, 168, 78, 0.4); }
-[data-theme="darksouls"] .server-icon.home { background: linear-gradient(135deg, #5a4420, #c8a84e); box-shadow: 0 0 8px rgba(200, 168, 78, 0.3); }
+[data-theme="darksouls"] .guild-icon.home { background: linear-gradient(135deg, #5a4420, #c8a84e); box-shadow: 0 0 8px rgba(200, 168, 78, 0.3); }
 [data-theme="darksouls"] .channel-item.active::before { background: #c8a84e; box-shadow: 0 0 6px rgba(200, 168, 78, 0.5); }
 [data-theme="darksouls"] .inline-code { color: #dcc06a; }
 [data-theme="darksouls"] .message-avatar, [data-theme="darksouls"] .message-avatar-img { border: 1px solid rgba(200, 168, 78, 0.2); }
@@ -636,7 +650,7 @@
 }
 
 [data-theme="eldenring"] .brand-text { background: linear-gradient(90deg, #d4a832, #8080c0); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-[data-theme="eldenring"] .server-icon.home { background: linear-gradient(135deg, #3a3060, #d4a832); box-shadow: 0 0 10px rgba(212, 168, 50, 0.3); }
+[data-theme="eldenring"] .guild-icon.home { background: linear-gradient(135deg, #3a3060, #d4a832); box-shadow: 0 0 10px rgba(212, 168, 50, 0.3); }
 [data-theme="eldenring"] .channel-item.active::before { background: #d4a832; box-shadow: 0 0 8px rgba(212, 168, 50, 0.5); }
 [data-theme="eldenring"] .inline-code { color: #80a0d0; }
 [data-theme="eldenring"] .message-avatar, [data-theme="eldenring"] .message-avatar-img { border: 1px solid rgba(212, 168, 50, 0.2); }
@@ -680,8 +694,8 @@
 }
 
 [data-theme="minecraft"] .brand-text { color: #55bb55; text-shadow: 2px 2px 0 #2a5a2a; }
-[data-theme="minecraft"] .server-icon.home { background: #55bb55; box-shadow: 2px 2px 0 #2a5a2a; border-radius: 4px; }
-[data-theme="minecraft"] .server-icon:hover { border-radius: 4px; }
+[data-theme="minecraft"] .guild-icon.home { background: #55bb55; box-shadow: 2px 2px 0 #2a5a2a; border-radius: 4px; }
+[data-theme="minecraft"] .guild-icon:hover { border-radius: 4px; }
 [data-theme="minecraft"] .channel-item.active::before { background: #55bb55; }
 [data-theme="minecraft"] .inline-code { color: #55bbff; }
 [data-theme="minecraft"] .message-avatar, [data-theme="minecraft"] .message-avatar-img { border: 2px solid #3a3a3a; border-radius: 4px; }
@@ -727,7 +741,7 @@
 }
 
 [data-theme="ffx"] .brand-text { background: linear-gradient(90deg, #40a8e0, #c0a040); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-[data-theme="ffx"] .server-icon.home { background: linear-gradient(135deg, #1a4070, #40a8e0); box-shadow: 0 0 10px rgba(64, 168, 224, 0.3); }
+[data-theme="ffx"] .guild-icon.home { background: linear-gradient(135deg, #1a4070, #40a8e0); box-shadow: 0 0 10px rgba(64, 168, 224, 0.3); }
 [data-theme="ffx"] .channel-item.active::before { background: #40a8e0; box-shadow: 0 0 8px rgba(64, 168, 224, 0.4); }
 [data-theme="ffx"] .inline-code { color: #60c0f0; }
 [data-theme="ffx"] .message-avatar, [data-theme="ffx"] .message-avatar-img { border: 1px solid rgba(64, 168, 224, 0.25); }
@@ -771,7 +785,7 @@
 }
 
 [data-theme="zelda"] .brand-text { background: linear-gradient(90deg, #44bb44, #e8c030); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-[data-theme="zelda"] .server-icon.home { background: linear-gradient(135deg, #1a6a1a, #e8c030); box-shadow: 0 0 8px rgba(68, 187, 68, 0.3); }
+[data-theme="zelda"] .guild-icon.home { background: linear-gradient(135deg, #1a6a1a, #e8c030); box-shadow: 0 0 8px rgba(68, 187, 68, 0.3); }
 [data-theme="zelda"] .channel-item.active::before { background: #44bb44; box-shadow: 0 0 6px rgba(68, 187, 68, 0.5); }
 [data-theme="zelda"] .inline-code { color: #70c870; }
 [data-theme="zelda"] .mention { background: rgba(68, 187, 68, 0.15); color: #60d060; }
@@ -823,7 +837,7 @@
   );
 }
 [data-theme="fallout"] .brand-text { color: #14fe17; text-shadow: 0 0 8px rgba(20, 254, 23, 0.6); letter-spacing: 2px; text-transform: uppercase; }
-[data-theme="fallout"] .server-icon.home { background: #0a1a08; border: 1px solid #14fe17; box-shadow: 0 0 8px rgba(20, 254, 23, 0.3); color: #14fe17; }
+[data-theme="fallout"] .guild-icon.home { background: #0a1a08; border: 1px solid #14fe17; box-shadow: 0 0 8px rgba(20, 254, 23, 0.3); color: #14fe17; }
 [data-theme="fallout"] .channel-item.active::before { background: #14fe17; box-shadow: 0 0 8px rgba(20, 254, 23, 0.6); }
 [data-theme="fallout"] .message-avatar, [data-theme="fallout"] .message-avatar-img { border: 1px solid #14fe17; border-radius: 2px; }
 [data-theme="fallout"] .inline-code { color: #14fe17; background: rgba(20, 254, 23, 0.08); border: 1px solid rgba(20, 254, 23, 0.2); }
@@ -876,7 +890,7 @@
   --theme-logo:    "✝️";
 }
 [data-theme="scripture"] .brand-text { color: #c8a84c; text-shadow: 0 0 10px rgba(200, 168, 76, 0.3); font-style: italic; }
-[data-theme="scripture"] .server-icon.home { background: linear-gradient(135deg, #2a2010, #c8a84c); box-shadow: 0 0 8px rgba(200, 168, 76, 0.2); }
+[data-theme="scripture"] .guild-icon.home { background: linear-gradient(135deg, #2a2010, #c8a84c); box-shadow: 0 0 8px rgba(200, 168, 76, 0.2); }
 [data-theme="scripture"] .channel-item.active::before { background: #c8a84c; box-shadow: 0 0 6px rgba(200, 168, 76, 0.4); }
 [data-theme="scripture"] .inline-code { color: #dcc06a; background: rgba(200, 168, 76, 0.08); }
 [data-theme="scripture"] .mention { background: rgba(200, 168, 76, 0.12); color: #dcc06a; }
@@ -963,7 +977,7 @@
   --theme-logo:    "⛪";
 }
 [data-theme="chapel"] .brand-text { background: linear-gradient(90deg, #8a5cf0, #70b8ff, #e8b840); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-[data-theme="chapel"] .server-icon.home { background: linear-gradient(135deg, #4a2ca0, #8a5cf0); box-shadow: 0 0 10px rgba(138, 92, 240, 0.3); }
+[data-theme="chapel"] .guild-icon.home { background: linear-gradient(135deg, #4a2ca0, #8a5cf0); box-shadow: 0 0 10px rgba(138, 92, 240, 0.3); }
 [data-theme="chapel"] .channel-item.active::before { background: #8a5cf0; box-shadow: 0 0 6px rgba(138, 92, 240, 0.5); }
 [data-theme="chapel"] .inline-code { color: #a07af8; background: rgba(138, 92, 240, 0.08); }
 [data-theme="chapel"] .mention { background: rgba(138, 92, 240, 0.12); color: #a07af8; }
@@ -1056,7 +1070,7 @@
   --theme-logo:    "🕊️";
 }
 [data-theme="gospel"] .brand-text { color: #8b2032; font-style: italic; }
-[data-theme="gospel"] .server-icon.home { background: linear-gradient(135deg, #8b2032, #c8a84c); color: #fff; }
+[data-theme="gospel"] .guild-icon.home { background: linear-gradient(135deg, #8b2032, #c8a84c); color: #fff; }
 [data-theme="gospel"] .channel-item.active::before { background: #8b2032; box-shadow: 0 0 4px rgba(139, 32, 50, 0.3); }
 [data-theme="gospel"] .inline-code { color: #8b2032; background: rgba(139, 32, 50, 0.06); border: 1px solid rgba(139, 32, 50, 0.12); }
 [data-theme="gospel"] .mention { background: rgba(139, 32, 50, 0.08); color: #8b2032; }
@@ -1137,7 +1151,7 @@
   --theme-logo:    "📺";
 }
 [data-theme="crt"] .brand-text { color: #ffb000; text-shadow: 0 0 6px rgba(255, 176, 0, 0.5); letter-spacing: 3px; text-transform: uppercase; }
-[data-theme="crt"] .server-icon.home { background: #111; border: 2px solid #ffb000; box-shadow: 0 0 10px rgba(255, 176, 0, 0.2); color: #ffb000; }
+[data-theme="crt"] .guild-icon.home { background: #111; border: 2px solid #ffb000; box-shadow: 0 0 10px rgba(255, 176, 0, 0.2); color: #ffb000; }
 [data-theme="crt"] .channel-item.active::before { background: #ffb000; box-shadow: 0 0 6px rgba(255, 176, 0, 0.5); }
 [data-theme="crt"] .message-avatar, [data-theme="crt"] .message-avatar-img { border: 1px solid rgba(255, 176, 0, 0.3); border-radius: 0; }
 [data-theme="crt"] .inline-code { color: #ffb000; background: rgba(255, 176, 0, 0.08); }
@@ -1191,8 +1205,8 @@
   --scanline:      none;
 }
 [data-theme="win95"] .brand-text { color: #fff; font-weight: 700; text-shadow: none; }
-[data-theme="win95"] .server-icon.home { background: #bfbfbf; border: 3px outset #fff; color: #000; border-radius: 0; box-shadow: none; }
-[data-theme="win95"] .server-icon { border-radius: 0 !important; }
+[data-theme="win95"] .guild-icon.home { background: #bfbfbf; border: 3px outset #fff; color: #000; border-radius: 0; box-shadow: none; }
+[data-theme="win95"] .guild-icon { border-radius: 0 !important; }
 [data-theme="win95"] .channel-item.active::before { background: #000080; }
 [data-theme="win95"] .inline-code { color: #000080; background: #fff; border: 1px inset #808080; }
 [data-theme="win95"] .channel-badge { background: #000080; color: #fff; border-radius: 0; }
@@ -1389,8 +1403,8 @@
   background: none !important;
 }
 [data-theme="win95"] ::-webkit-scrollbar-corner { background: #bfbfbf !important; }
-[data-theme="win95"] .server-bar { background: #bfbfbf; border-right: 3px outset #fff; }
-[data-theme="win95"] .server-bar .server-icon { border-radius: 0; }
+[data-theme="win95"] .guild-bar { background: #bfbfbf; border-right: 3px outset #fff; }
+[data-theme="win95"] .guild-bar .guild-icon { border-radius: 0; }
 [data-theme="win95"] .status-bar { background: #bfbfbf; border-top: 3px outset #fff; }
 [data-theme="win95"] .status-bar .status-item { border: 1px inset #808080; border-radius: 0; }
 [data-theme="win95"] * { border-radius: 0 !important; }
@@ -1456,6 +1470,7 @@
 [data-theme="win95"] input[type="range"].vertical {
   writing-mode: bt-lr;
   -webkit-appearance: slider-vertical;
+  appearance: slider-vertical;
   width: 22px; height: auto;
 }
 [data-theme="win95"] input[type="range"][orient="vertical"]::-webkit-slider-thumb,
@@ -2168,7 +2183,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
 /* ── Minecraft: Pixelated border style ─────────────── */
 [data-theme="minecraft"] .message-avatar,
 [data-theme="minecraft"] .message-avatar-img { image-rendering: pixelated; border-radius: 0 !important; }
-[data-theme="minecraft"] .server-icon { border-radius: 2px; image-rendering: pixelated; }
+[data-theme="minecraft"] .guild-icon { border-radius: 2px; image-rendering: pixelated; }
 [data-theme="minecraft"] .user-item-avatar { border-radius: 2px; image-rendering: pixelated; }
 [data-theme="minecraft"] .sidebar { border-right: 3px solid #3a3a2a; }
 [data-theme="minecraft"] .channel-header { border-bottom: 3px solid #3a3a2a; }
@@ -4035,7 +4050,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
    SERVER BAR (far left, Discord-style)
    ═══════════════════════════════════════════════════════════ */
 
-.server-bar {
+.guild-bar {
   width: 56px;
   min-width: 56px;
   background: var(--bg-secondary);
@@ -4049,7 +4064,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   overflow-x: hidden;
 }
 
-.server-icon {
+.guild-icon {
   width: 40px;
   height: 40px;
   border-radius: 50%;
@@ -4063,10 +4078,10 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   flex-shrink: 0;
 }
 
-.server-icon:hover { border-radius: 12px; background: var(--accent); }
-.server-icon.home { border-radius: 12px; background: var(--accent); }
+.guild-icon:hover { border-radius: 12px; background: var(--accent); }
+.guild-icon.home { border-radius: 12px; background: var(--accent); }
 
-.server-icon.home.bounce {
+.guild-icon.home.bounce {
   animation: serverBounce 0.4s ease;
 }
 
@@ -4076,14 +4091,14 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   60% { transform: translateY(-3px); }
 }
 
-.server-icon-text {
+.guild-icon-text {
   font-size: 18px;
   color: var(--text-primary);
   pointer-events: none;
   font-weight: 700;
 }
 
-.server-icon-img {
+.guild-icon-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -4091,23 +4106,23 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   pointer-events: none;
 }
 
-.server-icon.add-server {
+.guild-icon.add-guild {
   background: transparent;
   border: 2px dashed var(--border-light);
 }
 
-.server-icon.add-server:hover {
+.guild-icon.add-guild:hover {
   border-color: var(--accent);
   background: transparent;
   border-radius: 12px;
 }
 
-.server-icon.add-server .server-icon-text {
+.guild-icon.add-guild .guild-icon-text {
   font-size: 22px;
   color: var(--accent);
 }
 
-.server-status-dot {
+.guild-status-dot {
   position: absolute;
   bottom: -1px;
   right: -1px;
@@ -4117,11 +4132,11 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   border: 2px solid var(--bg-secondary);
 }
 
-.server-status-dot.online  { background: var(--success); }
-.server-status-dot.offline { background: var(--text-muted); }
-.server-status-dot.unknown { background: var(--warning); }
+.guild-status-dot.online  { background: var(--success); }
+.guild-status-dot.offline { background: var(--text-muted); }
+.guild-status-dot.unknown { background: var(--warning); }
 
-.server-separator {
+.guild-separator {
   width: 24px;
   height: 2px;
   background: var(--border);
@@ -4149,25 +4164,25 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   padding: 0;
 }
 
-.server-icon.remote:hover .server-remove { display: flex; }
+.guild-icon.remote:hover .server-remove { display: flex; }
 
 /* Manage Servers gear button */
-.server-icon.manage-servers {
+.guild-icon.manage-guilds {
   background: transparent;
   border: 2px dashed var(--border-light);
   margin-top: 2px;
 }
-.server-icon.manage-servers:hover {
+.guild-icon.manage-guilds:hover {
   border-color: var(--accent);
   background: transparent;
   border-radius: 12px;
 }
-.server-icon.manage-servers .server-icon-text {
+.guild-icon.manage-guilds .guild-icon-text {
   font-size: 18px;
   color: var(--text-secondary);
   transition: color 0.15s;
 }
-.server-icon.manage-servers:hover .server-icon-text {
+.guild-icon.manage-guilds:hover .guild-icon-text {
   color: var(--accent);
 }
 
@@ -4200,7 +4215,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
 .manage-server-row:hover {
   background: var(--bg-hover);
 }
-.manage-server-icon {
+.manage-guild-icon {
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -4214,7 +4229,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   color: var(--text-primary);
   overflow: hidden;
 }
-.manage-server-icon img {
+.manage-guild-icon img {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -5898,6 +5913,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   text-overflow: ellipsis;
   display: -webkit-box;
   -webkit-line-clamp: 3;
+  line-clamp: 3;
   -webkit-box-orient: vertical;
 }
 
@@ -6958,7 +6974,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   .mobile-panel-close { display: flex; }
 
   /* Collapse server bar */
-  .server-bar { width: 0; min-width: 0; overflow: hidden; border: none; padding: 0; }
+  .guild-bar { width: 0; min-width: 0; overflow: hidden; border: none; padding: 0; }
 
   /* Main area takes full width on mobile */
   .main { width: 100%; min-width: 0; }
@@ -6986,7 +7002,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   }
 
   /* Bring server bar back inside the sidebar overlay */
-  #app-body.mobile-sidebar-open .server-bar {
+  #app-body.mobile-sidebar-open .guild-bar {
     position: fixed;
     left: 280px;
     top: 0;
@@ -7001,7 +7017,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
     padding: 8px 0;
   }
 
-  #app-body.mobile-sidebar-open .server-bar {
+  #app-body.mobile-sidebar-open .guild-bar {
     transform: translateX(0);
   }
 
@@ -7101,7 +7117,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   .sidebar { width: 85vw; min-width: 85vw; }
 
   /* Hide server bar on phones — sidebar already covers enough, server bar eats space */
-  #app-body.mobile-sidebar-open .server-bar {
+  #app-body.mobile-sidebar-open .guild-bar {
     display: none;
   }
 
@@ -7384,7 +7400,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   .icon-btn { min-width: 40px; min-height: 40px; font-size: 18px; }
   .theme-btn { width: 36px; height: 36px; }
   .toggle-row input[type="checkbox"] { width: 20px; height: 20px; }
-  .server-icon { width: 44px; height: 44px; }
+  .guild-icon { width: 44px; height: 44px; }
   .btn-voice { min-height: 36px; }
 
   /* Disable hover-only interactions */
@@ -8593,6 +8609,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -10109,7 +10126,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   border-bottom: none;
 }
 
-#app-body .server-bar[data-panel-pos="right"] {
+#app-body .guild-bar[data-panel-pos="right"] {
   order: 5;
   border-right: none;
   border-left: 1px solid var(--border);
@@ -10121,7 +10138,7 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   border-left: 1px solid var(--border);
 }
 
-#app-body .server-bar[data-panel-pos="left"] { order: 0; }
+#app-body .guild-bar[data-panel-pos="left"] { order: 0; }
 #app-body .sidebar[data-panel-pos="left"] { order: 1; }
 #app-body .main { order: 2; }
 #app-body .right-sidebar { order: 3; }
@@ -10723,13 +10740,13 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
 }
 
 /* ── Server Icon Upload (admin settings) ─────────── */
-.server-icon-upload-area {
+.guild-icon-upload-area {
   display: flex;
   align-items: flex-start;
   gap: 12px;
   margin-top: 8px;
 }
-.server-icon-preview {
+.guild-icon-preview {
   width: 52px;
   height: 52px;
   border-radius: 12px;
@@ -10741,21 +10758,21 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   overflow: hidden;
   border: 2px solid var(--border);
 }
-.server-icon-preview img {
+.guild-icon-preview img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.server-icon-preview .server-icon-text {
+.guild-icon-preview .guild-icon-text {
   font-size: 22px;
   color: var(--accent);
 }
-.server-icon-upload-controls {
+.guild-icon-upload-controls {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.server-bar .server-icon.home img {
+.guild-bar .guild-icon.home img {
   width: 100%;
   height: 100%;
   border-radius: inherit;
@@ -10955,14 +10972,14 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
   border-color: var(--accent-color, #5865f2);
   background: color-mix(in srgb, var(--accent-color, #5865f2) 8%, var(--bg-secondary));
 }
-.import-server-icon {
+.import-guild-icon {
   width: 32px;
   height: 32px;
   border-radius: 50%;
   flex-shrink: 0;
   object-fit: cover;
 }
-.import-server-icon-placeholder {
+.import-guild-icon-placeholder {
   width: 32px;
   height: 32px;
   display: flex;
@@ -11013,5 +11030,6 @@ input[type="range"]:not(.rgb-slider)::-moz-range-track {
 .imported-message .message-avatar {
   border: 2px solid #5865f2;
 }
+
 
 

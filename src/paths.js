@@ -59,7 +59,7 @@ function migrateFile(oldRel, newAbs) {
     try {
       fs.copyFileSync(oldAbs, newAbs);
       fs.unlinkSync(oldAbs);
-      console.log(`📦 Migrated ${oldRel} → ${newAbs}`);
+ console.log(`Migrated ${oldRel} → ${newAbs}`);
     } catch { /* silent — might lack permissions */ }
   }
 }
@@ -76,7 +76,7 @@ function migrateDir(oldRel, newDir) {
         if (!fs.existsSync(dst) && fs.statSync(src).isFile()) {
           fs.copyFileSync(src, dst);
           fs.unlinkSync(src);
-          console.log(`📦 Migrated ${oldRel}/${entry} → ${dst}`);
+ console.log(`Migrated ${oldRel}/${entry} → ${dst}`);
         }
       }
     } catch { /* silent */ }

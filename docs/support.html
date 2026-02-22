@@ -250,7 +250,7 @@
   <nav>
     <div class="nav-inner">
       <a href="index.html" class="nav-brand"><span class="hex">⬡</span> HAVEN</a>
-      <button class="nav-mobile-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')" aria-label="Toggle menu">☰</button>
+      <button class="nav-mobile-toggle" id="nav-toggle-btn" aria-label="Toggle menu">☰</button>
       <ul class="nav-links">
         <li><a href="index.html#features">Features</a></li>
         <li><a href="index.html#download">Download</a></li>
@@ -290,19 +290,19 @@
             </tr>
             <tr>
               <td>SSL_ERROR_RX_RECORD_TOO_LONG</td>
-              <td>Your browser is trying HTTPS but Haven is running HTTP. Go to <code>http://localhost:3000</code> (not https). See <a href="https://github.com/ancsemi/Haven/blob/main/GUIDE.md#troubleshooting" target="_blank">the guide</a> for details.</td>
+              <td>Your browser is trying HTTPS but Haven is running HTTP. Go to <code>http://localhost:YOUR_PORT</code> (not https), using the port shown in your terminal. See <a href="https://github.com/ancsemi/Haven/blob/main/GUIDE.md#troubleshooting" target="_blank">the guide</a> for details.</td>
             </tr>
             <tr>
               <td>Friends can't connect</td>
-              <td>They need your <strong>public IP</strong> (Google "what is my ip") + port 3000. You may need to <strong>port forward</strong> 3000 on your router. Your firewall must also allow it.</td>
+              <td>They need your <strong>public IP</strong> (Google "what is my ip") + your configured port (default 3000). You may need to <strong>port forward</strong> that port on your router. Your firewall must also allow it.</td>
             </tr>
             <tr>
               <td>Voice chat not working</td>
               <td>Voice requires HTTPS <em>or</em> localhost. If friends are connecting over the internet without HTTPS, voice won't work in most browsers. Install <a href="https://slproweb.com/products/Win32OpenSSL.html" target="_blank">OpenSSL</a> and restart Haven to enable HTTPS automatically.</td>
             </tr>
             <tr>
-              <td>"Port 3000 already in use"</td>
-              <td>Another program is using port 3000, or Haven is already running. Close the other terminal window, or restart your PC to free the port.</td>
+              <td>"Port already in use"</td>
+              <td>Another program is using your configured port, or Haven is already running. Close the other terminal window, change the <code>PORT</code> in your <code>.env</code> file, or restart your PC to free the port.</td>
             </tr>
             <tr>
               <td>Page loads but looks broken</td>
@@ -339,7 +339,7 @@
         <h3 style="margin-top: 24px;">How to report</h3>
         <div class="btn-row">
           <a href="mailto:help.havenapp@gmail.com?subject=Haven%20Bug%20Report&body=What%20happened%3A%0A%0AWhat%20I%20expected%3A%0A%0ASteps%20to%20reproduce%3A%0A%0AMy%20setup%20(OS%2C%20browser)%3A%0A" class="btn btn-primary">
-            ✉️ Email Us
+            Email Us
           </a>
           <a href="https://github.com/ancsemi/Haven/issues/new" target="_blank" class="btn btn-secondary">
             Open a GitHub Issue
@@ -360,7 +360,7 @@
 
       <div class="card">
         <div class="faq-item">
-          <button class="faq-q" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open');">
+          <button class="faq-q" >
             How do I update Haven?
             <span class="arrow">▼</span>
           </button>
@@ -370,7 +370,7 @@
         </div>
 
         <div class="faq-item">
-          <button class="faq-q" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open');">
+          <button class="faq-q" >
             Where is my data stored?
             <span class="arrow">▼</span>
           </button>
@@ -382,7 +382,7 @@
         </div>
 
         <div class="faq-item">
-          <button class="faq-q" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open');">
+          <button class="faq-q" >
             Can I move Haven to a different computer?
             <span class="arrow">▼</span>
           </button>
@@ -392,7 +392,7 @@
         </div>
 
         <div class="faq-item">
-          <button class="faq-q" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open');">
+          <button class="faq-q" >
             Do my friends need to create an account?
             <span class="arrow">▼</span>
           </button>
@@ -402,7 +402,7 @@
         </div>
 
         <div class="faq-item">
-          <button class="faq-q" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open');">
+          <button class="faq-q" >
             Is voice chat peer-to-peer?
             <span class="arrow">▼</span>
           </button>
@@ -412,7 +412,7 @@
         </div>
 
         <div class="faq-item">
-          <button class="faq-q" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open');">
+          <button class="faq-q" >
             Can I run Haven 24/7?
             <span class="arrow">▼</span>
           </button>
@@ -422,7 +422,7 @@
         </div>
 
         <div class="faq-item">
-          <button class="faq-q" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open');">
+          <button class="faq-q" >
             How do I get HTTPS working?
             <span class="arrow">▼</span>
           </button>
@@ -479,6 +479,17 @@
     });
     window.addEventListener('scroll', () => {
       document.querySelector('nav').style.background = window.scrollY > 100 ? 'rgba(21, 23, 42, 0.97)' : 'rgba(21, 23, 42, 0.85)';
+    });
+    // Mobile nav toggle
+    document.getElementById('nav-toggle-btn')?.addEventListener('click', () => {
+      document.querySelector('.nav-links').classList.toggle('open');
+    });
+    // FAQ accordion toggles
+    document.querySelectorAll('.faq-q').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.classList.toggle('open');
+        btn.nextElementSibling.classList.toggle('open');
+      });
     });
   </script>
 

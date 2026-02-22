@@ -43,7 +43,8 @@ ENV PORT=3000 \
 RUN mkdir -p /data/certs /data/uploads && chown -R node:node /app /data
 
 USER root
-EXPOSE 3000 3001
+# Default port + redirect port (override PORT via env / docker-compose)
+EXPOSE ${PORT} 3000
 VOLUME ["/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

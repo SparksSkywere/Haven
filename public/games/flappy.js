@@ -299,10 +299,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const list = document.getElementById('leaderboard-list');
     if (!list) return;
     if (!data || !data.length) {
-      list.innerHTML = '<p style="font-size:11px;color:var(--text-muted)">No scores yet</p>';
+      list._safeHTML = '<p style="font-size:11px;color:var(--text-muted)">No scores yet</p>';
       return;
     }
-    list.innerHTML = data.slice(0, 20).map((s, i) => {
+    list._safeHTML = data.slice(0, 20).map((s, i) => {
       const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) + '.';
       const name = s.username.replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
       return `<div class="lb-row"><span class="lb-rank">${medal}</span><span class="lb-name">${name}</span><span class="lb-score">${s.score}</span></div>`;

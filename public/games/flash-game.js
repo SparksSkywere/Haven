@@ -45,32 +45,32 @@ function initRuffle() {
     player.load(swfUrl).then(() => {
       applyVolume(parseInt(volSlider.value));
     }).catch((err) => {
-      container.innerHTML = `<div class="error-msg">Failed to load SWF: ${err.message}<br><br>Make sure the .swf file exists in <code>/games/roms/</code></div>`;
+      container._safeHTML = `<div class="error-msg">Failed to load SWF: ${err.message}<br><br>Make sure the .swf file exists in <code>/games/roms/</code></div>`;
     });
 
     setTimeout(() => {
       if (loadingMsg.parentNode) {
-        loadingMsg.innerHTML = '<div class="error-msg">Ruffle took too long to initialize. Try refreshing.</div>';
+        loadingMsg._safeHTML = '<div class="error-msg">Ruffle took too long to initialize. Try refreshing.</div>';
       }
     }, 20000);
   } catch (err) {
     const loadingMsg = document.getElementById('loading-msg');
-    if (loadingMsg) loadingMsg.innerHTML = `<div class="error-msg">Ruffle init error: ${err.message}</div>`;
+    if (loadingMsg) loadingMsg._safeHTML = `<div class="error-msg">Ruffle init error: ${err.message}</div>`;
   }
 }
 
 function loadGame() {
   if (!swfUrl) {
-    document.getElementById('loading-msg').innerHTML = '<div class="error-msg">No SWF file specified</div>';
+    document.getElementById('loading-msg')._safeHTML = '<div class="error-msg">No SWF file specified</div>';
     return;
   }
 
-  // Load Ruffle from CDN
+  // Load Ruffle from local self-hosted files (no CDN calls)
   const script = document.createElement('script');
-  script.src = 'https://unpkg.com/@ruffle-rs/ruffle';
+  script.src = '/games/ruffle/ruffle.js';
   script.onload = () => initRuffle();
   script.onerror = () => {
-    document.getElementById('loading-msg').innerHTML =
+    document.getElementById('loading-msg')._safeHTML =
       '<div class="error-msg">Failed to load Ruffle Flash emulator.<br>Check your internet connection.</div>';
   };
   document.head.appendChild(script);

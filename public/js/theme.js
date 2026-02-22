@@ -153,9 +153,9 @@ let _fxSpeedMult = 1.0;
 
 // Human-readable labels for effect speed sliders
 const _FX_LABELS = {
-  crt: '📺 CRT', ffx: '⚔️ Water', ice: '🧊 Frost', nord: '❄ Snow',
-  darksouls: '🔥 Embers', bloodborne: '🩸 Blood', matrix: 'Ⅿ Matrix',
-  cyberpunk: '⚡ Glitch', lotr: '⚜ Candle', eldenring: '✨ Golden Grace'
+  crt: 'CRT', ffx: 'Water', ice: 'Frost', nord: 'Snow',
+  darksouls: 'Embers', bloodborne: 'Blood', matrix: 'Ⅿ Matrix',
+  cyberpunk: 'Glitch', lotr: 'Candle', eldenring: 'Golden Grace'
 };
 
 // Get speed for a specific effect (per-effect → global fallback → 1.0)
@@ -191,7 +191,7 @@ function _rebuildEffectSpeedSliders() {
   if (!editor) return;
 
   // Clear existing sliders
-  editor.innerHTML = '';
+  editor.textContent =  '';
 
   // Get active dynamic effects
   const active = [..._activeFx].filter(fx => DYNAMIC_THEMES.includes(fx));
@@ -204,7 +204,7 @@ function _rebuildEffectSpeedSliders() {
 
     const row = document.createElement('label');
     row.className = 'rgb-slider-row';
-    row.innerHTML = `
+    row._safeHTML = `
       <span class="rgb-slider-label">${label}</span>
       <input type="range" class="slider-sm rgb-slider fx-per-effect-slider" min="15" max="200" value="${sliderVal}" data-effect="${fx}">
     `;
@@ -712,8 +712,8 @@ function _injectCrtSliders(parentEditor) {
   // Vignette row
   const vigRow = document.createElement('label');
   vigRow.className = 'rgb-slider-row';
-  vigRow.innerHTML = `
-    <span class="rgb-slider-label">📺 Vignette</span>
+  vigRow._safeHTML = `
+    <span class="rgb-slider-label">Vignette</span>
     <input type="range" class="slider-sm rgb-slider" id="crt-vig-inline" min="0" max="100" value="${vigVal}">
   `;
   parentEditor.appendChild(vigRow);
@@ -727,8 +727,8 @@ function _injectCrtSliders(parentEditor) {
   // Scanline row
   const scanRow = document.createElement('label');
   scanRow.className = 'rgb-slider-row';
-  scanRow.innerHTML = `
-    <span class="rgb-slider-label">📺 Scanlines</span>
+  scanRow._safeHTML = `
+    <span class="rgb-slider-label">Scanlines</span>
     <input type="range" class="slider-sm rgb-slider" id="crt-scan-inline" min="0" max="80" value="${scanVal}">
   `;
   parentEditor.appendChild(scanRow);

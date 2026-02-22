@@ -1,5 +1,5 @@
 const Database = require('better-sqlite3');
-const path = require('path');
+// Removed unused import: path
 const { DB_PATH } = require('./paths');
 
 let db;
@@ -24,8 +24,25 @@ function initDatabase() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS guilds (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      owner_id INTEGER NOT NULL REFERENCES users(id),
+      icon TEXT DEFAULT NULL,
+      invite_code TEXT UNIQUE NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS guild_members (
+      guild_id INTEGER REFERENCES guilds(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (guild_id, user_id)
+    );
+
     CREATE TABLE IF NOT EXISTS channels (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id INTEGER NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       code TEXT UNIQUE NOT NULL,
       created_by INTEGER REFERENCES users(id),
@@ -106,6 +123,8 @@ function initDatabase() {
       ON bans(user_id);
     CREATE INDEX IF NOT EXISTS idx_mutes_user
       ON mutes(user_id, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_guilds_invite
+      ON guilds(invite_code);
   `);
 
   // ── Safe schema migration for existing databases ──────
@@ -278,6 +297,81 @@ function initDatabase() {
     db.exec("ALTER TABLE messages ADD COLUMN original_name TEXT DEFAULT NULL");
   }
 
+  // ── Migration: guilds table and channel guild_id ───────
+  try {
+    db.prepare("SELECT id FROM guilds LIMIT 0").get();
+  } catch {
+    // Check if old servers table exists
+    let hasOldServers = false;
+    try {
+      db.prepare("SELECT id FROM servers LIMIT 0").get();
+      hasOldServers = true;
+    } catch {}
+
+    if (hasOldServers) {
+      // Migrate existing servers to guilds
+      db.exec(`
+        CREATE TABLE guilds AS SELECT * FROM servers;
+        CREATE TABLE guild_members AS SELECT server_id as guild_id, user_id, joined_at FROM server_members;
+        DROP TABLE server_members;
+        DROP TABLE servers;
+      `);
+    } else {
+      // Create guilds table
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS guilds (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          owner_id INTEGER NOT NULL REFERENCES users(id),
+          icon TEXT DEFAULT NULL,
+          invite_code TEXT UNIQUE NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_guilds_invite ON guilds(invite_code);
+      `);
+      
+      // Create guild_members table
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS guild_members (
+          guild_id INTEGER REFERENCES guilds(id) ON DELETE CASCADE,
+          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (guild_id, user_id)
+        );
+      `);
+    }
+    
+    // Create default guild for existing channels
+    const crypto = require('crypto');
+    const defaultInviteCode = crypto.randomBytes(4).toString('hex');
+    const adminUser = db.prepare("SELECT id FROM users WHERE is_admin = 1 ORDER BY id LIMIT 1").get();
+    const defaultOwnerId = adminUser ? adminUser.id : 1;
+    
+    db.prepare(
+      'INSERT INTO guilds (name, owner_id, invite_code) VALUES (?, ?, ?)'
+    ).run('Haven Server', defaultOwnerId, defaultInviteCode);
+    
+    const defaultGuild = db.prepare('SELECT id FROM guilds LIMIT 1').get();
+    
+    // Add guild_id column to channels if not exists
+    try {
+      db.prepare("SELECT guild_id FROM channels LIMIT 0").get();
+    } catch {
+      db.exec("ALTER TABLE channels ADD COLUMN guild_id INTEGER DEFAULT NULL REFERENCES guilds(id) ON DELETE CASCADE");
+    }
+    
+    // Migrate existing channels to default guild
+    db.prepare('UPDATE channels SET guild_id = ? WHERE guild_id IS NULL').run(defaultGuild.id);
+    
+    // Add all existing users to the default guild
+    db.prepare(`
+      INSERT OR IGNORE INTO guild_members (guild_id, user_id)
+      SELECT ?, id FROM users
+    `).run(defaultGuild.id);
+    
+    db.exec('CREATE INDEX IF NOT EXISTS idx_channels_guild ON channels(guild_id)');
+  }
+
   // ── Migration: channel code settings columns ─────────────
   const codeSettingsCols = [
     { name: 'code_visibility',        sql: "ALTER TABLE channels ADD COLUMN code_visibility TEXT DEFAULT 'public'" },
@@ -323,13 +417,22 @@ function initDatabase() {
   }
 
   // ── Migration: roles system ─────────────────────────────
+  // Check if old roles table exists with scope column, drop it
+  try {
+    db.prepare("SELECT scope FROM roles LIMIT 0").get();
+    db.exec("DROP TABLE roles");
+    db.exec("DROP TABLE IF EXISTS user_roles");
+    db.exec("DROP TABLE IF EXISTS role_permissions");
+  } catch {}
+  
   db.exec(`
     CREATE TABLE IF NOT EXISTS roles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id INTEGER REFERENCES guilds(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       level INTEGER NOT NULL DEFAULT 0,
-      scope TEXT NOT NULL DEFAULT 'server',
       color TEXT DEFAULT NULL,
+      permissions TEXT DEFAULT '[]',  -- JSON array of permissions
       auto_assign INTEGER NOT NULL DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -338,58 +441,49 @@ function initDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-      channel_id INTEGER DEFAULT NULL REFERENCES channels(id) ON DELETE CASCADE,
       granted_by INTEGER REFERENCES users(id),
       granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE (user_id, role_id, channel_id)
+      UNIQUE (user_id, role_id)
     );
 
-    CREATE TABLE IF NOT EXISTS role_permissions (
-      role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-      permission TEXT NOT NULL,
-      allowed INTEGER NOT NULL DEFAULT 1,
-      PRIMARY KEY (role_id, permission)
-    );
-
+    CREATE INDEX IF NOT EXISTS idx_roles_guild ON roles(guild_id);
     CREATE INDEX IF NOT EXISTS idx_user_roles_user ON user_roles(user_id);
-    CREATE INDEX IF NOT EXISTS idx_user_roles_channel ON user_roles(channel_id);
+    CREATE INDEX IF NOT EXISTS idx_user_roles_role ON user_roles(role_id);
   `);
 
-  // Seed default roles if none exist
-  const roleCount = db.prepare('SELECT COUNT(*) as cnt FROM roles').get();
-  if (roleCount.cnt === 0) {
-    const insertRole = db.prepare('INSERT INTO roles (name, level, scope, color) VALUES (?, ?, ?, ?)');
-    const insertPerm = db.prepare('INSERT INTO role_permissions (role_id, permission, allowed) VALUES (?, ?, 1)');
-
-    // Server Mod — level 50 (below admin which is implied level 100)
-    const serverMod = insertRole.run('Server Mod', 50, 'server', '#3498db');
-    const serverModPerms = [
-      'kick_user', 'mute_user', 'delete_message', 'pin_message',
-      'set_channel_topic', 'manage_sub_channels', 'rename_channel',
-      'rename_sub_channel', 'delete_lower_messages', 'manage_webhooks',
-      'upload_files', 'use_voice', 'view_history',
-      'delete_own_messages', 'edit_own_messages'
-    ];
-    serverModPerms.forEach(p => insertPerm.run(serverMod.lastInsertRowid, p));
-
-    // Channel Mod — level 25 (channel-scoped)
-    const channelMod = insertRole.run('Channel Mod', 25, 'channel', '#2ecc71');
-    const channelModPerms = [
-      'kick_user', 'mute_user', 'delete_message', 'pin_message',
-      'manage_sub_channels', 'rename_sub_channel', 'delete_lower_messages',
-      'upload_files', 'use_voice', 'view_history',
-      'delete_own_messages', 'edit_own_messages'
-    ];
-    channelModPerms.forEach(p => insertPerm.run(channelMod.lastInsertRowid, p));
-
-    // User — level 1 (default role for all new users, auto-assigned)
-    const userRole = insertRole.run('User', 1, 'server', '#95a5a6');
-    db.prepare('UPDATE roles SET auto_assign = 1 WHERE id = ?').run(userRole.lastInsertRowid);
-    const userPerms = [
-      'delete_own_messages', 'edit_own_messages', 'upload_files',
-      'use_voice', 'view_history'
-    ];
-    userPerms.forEach(p => insertPerm.run(userRole.lastInsertRowid, p));
+  // Seed default roles for each guild if none exist
+  const guilds = db.prepare('SELECT id FROM guilds').all();
+  for (const guild of guilds) {
+    const roleCount = db.prepare('SELECT COUNT(*) as cnt FROM roles WHERE guild_id = ?').get(guild.id);
+    if (roleCount.cnt === 0) {
+      const insertRole = db.prepare('INSERT INTO roles (guild_id, name, level, color, permissions, auto_assign) VALUES (?, ?, ?, ?, ?, ?)');
+      
+      // Server Mod — level 50 (below admin which is implied level 100)
+      const serverModPerms = [
+        'kick_user', 'mute_user', 'delete_message', 'pin_message',
+        'set_channel_topic', 'manage_sub_channels', 'rename_channel',
+        'rename_sub_channel', 'delete_lower_messages', 'manage_webhooks',
+        'upload_files', 'use_voice', 'view_history',
+        'delete_own_messages', 'edit_own_messages', 'manage_roles'
+      ];
+      insertRole.run(guild.id, 'Server Mod', 50, '#3498db', JSON.stringify(serverModPerms), 0);
+      
+      // Channel Mod — level 25
+      const channelModPerms = [
+        'kick_user', 'mute_user', 'delete_message', 'pin_message',
+        'manage_sub_channels', 'rename_sub_channel', 'delete_lower_messages',
+        'upload_files', 'use_voice', 'view_history',
+        'delete_own_messages', 'edit_own_messages'
+      ];
+      insertRole.run(guild.id, 'Channel Mod', 25, '#2ecc71', JSON.stringify(channelModPerms), 0);
+      
+      // User — level 1 (default role for all new users, auto-assigned)
+      const userPerms = [
+        'delete_own_messages', 'edit_own_messages', 'upload_files',
+        'use_voice', 'view_history'
+      ];
+      insertRole.run(guild.id, 'User', 1, '#95a5a6', JSON.stringify(userPerms), 1);
+    }
   }
 
   // ── Migration: add auto_assign column to roles if missing ──
@@ -398,25 +492,28 @@ function initDatabase() {
   } catch {
     db.exec('ALTER TABLE roles ADD COLUMN auto_assign INTEGER NOT NULL DEFAULT 0');
     // Mark the existing "User" role as auto-assign for backwards compat
-    db.prepare("UPDATE roles SET auto_assign = 1 WHERE name = 'User' AND level = 1 AND scope = 'server'").run();
+    db.prepare("UPDATE roles SET auto_assign = 1 WHERE name = 'User' AND level = 1").run();
   }
 
-  // ── Migration: auto-assign flagged roles to all existing users who lack any server role ──
-  const autoRoles = db.prepare('SELECT id FROM roles WHERE auto_assign = 1 AND scope = ?').all('server');
+  // ── Migration: auto-assign flagged roles to all existing guild members who lack any role in that guild ──
+  const autoRoles = db.prepare('SELECT id, guild_id FROM roles WHERE auto_assign = 1').all();
   for (const ar of autoRoles) {
     db.prepare(`
-      INSERT OR IGNORE INTO user_roles (user_id, role_id, channel_id, granted_by)
-      SELECT u.id, ?, NULL, NULL FROM users u
-      WHERE u.id NOT IN (SELECT DISTINCT user_id FROM user_roles WHERE channel_id IS NULL)
-    `).run(ar.id);
+      INSERT OR IGNORE INTO user_roles (user_id, role_id, granted_by)
+      SELECT gm.user_id, ?, NULL FROM guild_members gm
+      WHERE gm.guild_id = ? AND gm.user_id NOT IN (
+        SELECT DISTINCT ur.user_id FROM user_roles ur 
+        JOIN roles r ON ur.role_id = r.id 
+        WHERE r.guild_id = ?
+      )
+    `).run(ar.id, ar.guild_id, ar.guild_id);
   }
 
-  // ── Cleanup: remove duplicate user_roles (NULL channel_id duplicates) ──
-  // SQLite UNIQUE constraints don't prevent duplicate NULLs, so clean up on startup
+  // ── Cleanup: remove duplicate user_roles ──
   db.exec(`
     DELETE FROM user_roles WHERE id NOT IN (
       SELECT MIN(id) FROM user_roles
-      GROUP BY user_id, role_id, COALESCE(channel_id, -1)
+      GROUP BY user_id, role_id
     )
   `);
 
@@ -512,11 +609,20 @@ function initDatabase() {
     }
   } catch { /* ignore */ }
 
-  // ── Migration: imported_from column on messages (Discord import) ──
+  // ── Migration: guild_id on messages ───────────────────
   try {
-    db.prepare("SELECT imported_from FROM messages LIMIT 0").get();
+    db.prepare("SELECT guild_id FROM messages LIMIT 0").get();
   } catch {
-    db.exec("ALTER TABLE messages ADD COLUMN imported_from TEXT DEFAULT NULL");
+    db.exec("ALTER TABLE messages ADD COLUMN guild_id INTEGER REFERENCES guilds(id) ON DELETE CASCADE");
+    
+    // Populate guild_id from channel's guild_id
+    // db.exec(`
+    //   UPDATE messages SET guild_id = (
+    //     SELECT c.guild_id FROM channels c WHERE c.id = messages.channel_id
+    //   ) WHERE guild_id IS NULL
+    // `);
+    
+    db.exec('CREATE INDEX IF NOT EXISTS idx_messages_guild ON messages(guild_id)');
   }
 
   // ── Migration: webhook_avatar column on messages (Discord import avatars) ──

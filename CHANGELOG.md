@@ -11,6 +11,115 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 
 ---
 
+## [2.2.3] — 2026-02-22
+
+### Notes
+I got sent this project from a friend but I find this has been vibe coded? I can see a lot of AI style coding, I have ran my scanner and found over 200 issues from security issues to performance problems, I have changed a lot of it out, replaced and removed code.
+
+This has been my own contribution but to my fork only, if the devs see this, you can copy any part of it, I have fixed many of the missing code such as the ports not being dynamic with the .env that exists.
+
+The changes done will make sure everything here fits what I want specifically, on ocassion I may read the current commits and add them to this code but after heavy review as I do not trust what is posted without a thorough read!
+
+### Added
+- **Zero-external-calls guarantee** — Haven no longer contacts any external server on its own during normal operation. Google Fonts, Google STUN servers, Google Analytics, the GitHub update checker, and ipify.org IP detection have all been replaced or removed. Users can confidently claim "no data is sent to a random machine."
+- **Discord-style server invite system** — shareable invite links (`/invite/CODE`) work exactly like Discord invite URLs. A server-wide 8-character invite code is auto-generated on first launch and stored in the database. The `DOMAIN` environment variable enables pretty invite URLs (e.g. `https://haven.example.com/invite/abc12345`); without it, the server falls back to `HOST:PORT`.
+- **`/invite/:code` HTTP route** — visiting an invite URL redirects to `/?invite=CODE`, where the login page preserves the invite code through authentication and the app auto-joins the user on connect.
+- **`/api/server-info` API endpoint** — public endpoint returning server name, icon, member count, invite code, and fully-qualified invite URL. Used by the admin panel, setup wizard, and multi-server status pings.
+- **Auto-join all public channels on registration** — new users are automatically added to every non-DM, non-private channel (and their non-private sub-channels) when they register, exactly like joining a Discord server gives access to all public channels.
+- **Auto-add all users to new public channels** — when a channel is created, all existing users are automatically added as members and notified in real-time, mirroring Discord's behaviour where new channels instantly appear for everyone.
+- **"Join a Server" modal** — the server bar "+" button now opens a Discord-style dialog that accepts invite links or codes. Entering a local server code joins all public channels; entering a remote Haven URL adds it as a bookmarked external server.
+- **Admin invite URL display** — the Server Settings panel now shows the full invite URL with a one-click "Copy Link" button, the raw invite code, and Regenerate/Clear actions.
+- **Setup wizard invite step** — the final wizard step now prominently displays the server's invite link with a copy button and explains the 3-step join process (share link → register → auto-join).
+- **`DOMAIN` environment variable** — optional `.env` setting for servers with a custom domain. When set, invite URLs use `https://DOMAIN/invite/CODE` instead of `http://HOST:PORT/invite/CODE`.
+- **Self-hosted web fonts** — VT323 and Share Tech Mono font files are now bundled locally under `public/fonts/` as WOFF2 files. The Google Fonts CDN import has been replaced with local `@font-face` declarations.
+- **Self-hosted Ruffle Flash emulator** — the full Ruffle WASM package is now bundled under `public/games/ruffle/` instead of loading from the unpkg CDN.
+- **Discord-style ownership model** — the first user to register on a fresh server automatically becomes the owner/admin, exactly like creating a new Discord server. No special username required. The `ADMIN_USERNAME` environment variable has been removed from all code, configuration files, and documentation.
+- **Channel creator management** — users who create a channel can now fully manage it (delete, rotate invite codes, configure code settings, toggle permissions, set slow mode, set categories, reorder) without needing a server-wide admin role. This mirrors Discord where the channel creator has full control over their channel.
+- **`_isChannelOwner()` and `_canManageChannel()` client helpers** — new methods on the client app for consistent channel-ownership permission checks throughout the UI.
+- **`create_channel` permission for all users** — the default User role (level 1) now includes the `create_channel` permission, and the permission threshold has been lowered from 50 to 1. Any user can create channels, just like Discord. Existing databases are automatically migrated.
+- **Thread / reply system** — any message can now be opened as a thread. A side panel shows the root message, a reply count divider, and all threaded replies. Thread replies do not appear in the main channel feed, keeping conversations focused. New socket events (`get-thread-messages`, `send-thread-message`), a `thread_id` foreign-key column with index, full client-side UI (open/close/render/send), and 176 lines of dedicated CSS.
+- **Client-side XSS sanitiser (`safe-html.js`)** — new script provides `Element.prototype._safeHTML` and `window.safeInsertHTML()`. All user-facing HTML injection points across the app, games, and theme files now pass through this sanitiser, which strips `<script>` tags, event-handler attributes, `javascript:` URIs, and other dangerous elements before DOM insertion.
+- **Stop Haven.bat** — new one-click script reads the configured `PORT` from `.env`, locates the running Node process via `netstat`, and terminates it with `taskkill`.
+- **Launcher network diagnostics** — `Start Haven.bat` and `start.sh` now detect LAN IP (via `ipconfig` / `ip route`), public IP (via the ipify API), and test basic internet connectivity before startup, displaying all addresses to the user.
+- **Firewall auto-configuration** — `Start Haven.bat` checks for an existing Windows Firewall rule and creates one automatically (inbound TCP on the configured port) if missing.
+- **HAVEN_QUIET mode** — launchers set `HAVEN_QUIET=1` so the server suppresses routine startup banners, keeping terminal output focused on actionable information.
+- **Foreground server process** — `Start Haven.bat` now launches the Node server in the foreground so Ctrl+C cleanly shuts it down, replacing the previous background-spawn approach.
+- **Shared upload helpers** — new `validateImageMagicBytes()` and `safeImageRename()` functions in the server eliminate three duplicate inline implementations across avatar, webhook-avatar, and image-upload routes.
+- **Rate-limiter factory** — `createRateLimiter(limit, windowMs)` replaces three separate inline rate-limiter blocks (upload, GIF, link-preview) with a single reusable factory.
+
+### Fixed
+- **Login "Connection error" on plain HTTP** — `crypto.subtle` is only available in Secure Contexts (HTTPS/localhost). Accessing Haven over plain HTTP (e.g. `http://192.168.0.57:3001`) caused `deriveE2EWrappingKey()` to throw inside the login/register try-catch, producing a misleading "Connection error — is the server running?" message. Added a `_cryptoAvailable` check that gracefully skips E2E key derivation on HTTP instead of crashing.
+- **Password length mismatch** — the client login page said "Minimum 6 characters" but the server required 8. Updated both the `minlength` attribute and help text to 8.
+- **Registration error too vague** — "Registration could not be completed" gave no indication that the username was already taken. Now returns 409 with "Username is already taken".
+- **Duplicate `const channel` declarations** — several socket handlers (`set-slow-mode`, `set-sort-alphabetical`, `set-channel-category`) had duplicate variable declarations after the channel-creator permission check was added. Removed the redundant lookups.
+- **N+1 unread-count queries** — per-channel unread counts are now fetched in a single batched CTE query instead of one query per channel.
+- **N+1 DM-target queries** — DM conversation target usernames are now resolved in a single batched query instead of one per conversation.
+- **Channel-code rotation performance** — the prepared `UPDATE` statement is hoisted outside the loop and all rotations run inside a single transaction.
+- **Push-subscription cleanup** — the prepared `DELETE` for expired subscriptions is hoisted outside the loop.
+- **Server-code join query** — the prepared `SELECT` for sub-channel membership is hoisted outside the join handler.
+- **Auto-role and sub-channel inserts** — new-member role grants and sub-channel subscriptions are wrapped in a transaction with a guard against empty arrays.
+- **Role-permission updates not atomic** — permission changes for a role are now wrapped in a single transaction so partial writes cannot occur.
+- **Auto-role migration safety** — the v2.2.2 auto-role migration is wrapped in a transaction with a length check.
+- **Registration no longer auto-joins channels** — New users start with empty sidebar, matching Discord where you need an invite to join a server. Registration creates an account but no channel access.
+- **Channel deletion for creators** — Channel creators can now delete their own channels from the context menu, not just admins. This matches Discord's permission model.
+
+### Security
+- **Google STUN servers removed** — WebRTC ICE configuration no longer includes Google's public STUN servers (`stun.l.google.com`). Voice chat still works on LAN without any external STUN/TURN traffic. Admins can configure their own ICE servers if needed.
+- **GitHub update checker removed** — the client-side `_checkForUpdates()` method that polled `api.github.com` every 30 minutes has been completely removed (call + method body + `_isNewerVersion` helper).
+- **Google Analytics removed** — `gtag.js` scripts removed from `docs/index.html` and `website/index.html`. No analytics or tracking of any kind.
+- **Public IP detection removed from launchers** — `Start Haven.bat` and `start.sh` no longer call `api.ipify.org` to detect a public IP. Only the local LAN address is displayed.
+- **Content Security Policy tightened** — `unpkg.com` removed from `script-src` and `worker-src` directives now that Ruffle is self-hosted.
+- **E2E key derivation graceful degradation** — `deriveE2EWrappingKey()` returns `null` instead of throwing when `crypto.subtle` is unavailable (non-secure context). `sessionStorage` writes are guarded with `if (e2eWrap)` checks.
+- **Max password length raised** — increased from 128 to 1024 characters on both register and change-password endpoints to support passphrases and generated passwords.
+- **CORS origin validation** — the `/api/health` endpoint now parses and validates the `Origin` header against `http:` / `https:` protocols instead of reflecting a wildcard `*`.
+- **`SELECT *` eliminated** — login and change-password queries in `auth.js` now request only the columns they need (`id`, `username`, `password_hash`, `is_admin`, `display_name`).
+- **Column-name whitelisting on dynamic SQL** — `database.js` migrations that iterate over column names now reject any name not matching `/^[a-z_]+$/`. Dynamic `UPDATE` statements for channels and roles validate column names against explicit `Set` whitelists (`allowedChannelCols`, `allowedRoleCols`).
+- **`rejectUnauthorized` scoped** — the TLS override is now limited to the self-signed health-check agent with an inline comment, instead of being set process-wide.
+- **`Set.has()` for permission checks** — `validPerms` converted from an `Array` (`.includes()`) to a `Set` (`.has()`) for constant-time lookups.
+- **innerHTML → _safeHTML / textContent** — approximately 50 `innerHTML` assignments across `app.js`, `theme.js`, `flappy.js`, `flash-game.js`, and `io-games.js` now use the new sanitiser. Element-clearing calls (`innerHTML = ''`) replaced with `textContent = ''`.
+
+### Changed
+- **"Add Server" → "Join a Server"** — the server bar "+" button and its modal have been completely reworked to match Discord's join flow. Invite codes and links are the primary input; adding an external Haven server is a secondary action.
+- **"Join a Channel" → "Join Private Channel"** — the sidebar channel join input is now clearly labelled for private channel codes only, since public channels are joined automatically.
+- **Server invite code auto-generated** — the server creates an 8-character hex invite code on first boot if one doesn't exist, stored in `server_settings`. No manual generation required.
+- **Invite URL protocol detection** — the `/api/server-info` endpoint now correctly uses `http://` or `https://` based on the actual SSL configuration rather than defaulting to `https`.
+- **External calls are now opt-in only** — all remaining external network calls (GIPHY, YouTube/Spotify/SoundCloud embeds, link previews, Discord import, port checker, .io games, localtunnel) are user-initiated and require explicit action. The server makes zero automatic outbound requests on startup or during idle operation.
+- **`ADMIN_USERNAME` removed everywhere** — deleted from `.env`, `.env.example`, `docker-compose.yml`, `src/auth.js`, `src/socketHandlers.js`, and `server.js`. The server startup banner now shows "Owner: First registered user" instead of "Admin: admin".
+- **First-user-is-owner registration** — `src/auth.js` now counts existing users (`SELECT COUNT(*) FROM users`) during registration. If zero, the new user gets `is_admin=1`. Works identically to how Discord assigns ownership to whoever creates a server.
+- **Socket auth no longer syncs admin from .env** — `src/socketHandlers.js` reads `is_admin` directly from the database on every connection instead of comparing against an environment variable.
+- **Channel management checks updated** — all channel management socket handlers (`delete-channel`, `update-channel-code-settings`, `rotate-channel-code`, `toggle-channel-permission`, `set-slow-mode`, `set-sort-alphabetical`, `set-channel-category`, `move-channel`) now allow the action if the user is admin OR the channel creator.
+- **Topic bar edit access** — the topic edit pencil icon now appears for channel creators, not just admins and users with `set_channel_topic` permission.
+- **Database migration** — existing databases automatically get the lowered `create_channel` threshold and the `create_channel` permission added to existing User roles.
+- **Synchronous fs → async fs/promises** — all file-system calls in `server.js` (uploads, deletes, directory reads, existence checks, file writes) converted from blocking `fs.*Sync` to non-blocking `fsp.*` with proper error handling.
+- **Console-log cleanup** — removed emoji prefixes from every server and client log message; routine events (connections, disconnections, renames, DM deletes) downgraded from `console.log` to `console.debug`; JWT secret value no longer printed; avatar and E2E debug lines removed entirely.
+- **UI emoji removal** — stripped decorative emoji prefixes from all labels, headings, buttons, nav items, modal titles, context menus, wizard steps, and status indicators across `app.html`, `app.js`, `voice.js`, `theme.js`, `e2e.js`, `paths.js`, `docker-entrypoint.sh`, game pages, docs, and website.
+- **Start Haven.bat rewritten** — reads `PORT` from `.env` instead of hardcoding 3000; syncs `.env` between project and data directories; detects Node.js availability; checks port availability before launch; generates SSL certs only when OpenSSL is present; displays LAN/public URLs with correct protocol.
+- **start.sh rewritten** — same improvements as the `.bat` launcher plus a Node.js version guard (rejects v24+ due to compatibility issues).
+- **install-node.ps1 tidied** — redundant comments removed, error messages clarified, installation verification step added.
+- **GUIDE.md overhauled** — complete rewrite with a 39-section table of contents covering every feature, configuration option, and troubleshooting scenario. Removed all `ADMIN_USERNAME` references; rewrote First Launch, Configuration Reference, Administration Guide, Admin Transfer, and Built-in Roles sections to reflect the Discord-style ownership model. Approximately 860 lines added and 730 removed.
+- **README.md streamlined** — removed the v2.0.0 Discord-import promotional section, simplified quick-start instructions, updated screenshot and version badge. Replaced "register with username admin" with first-user-is-owner wording.
+- **Website & docs** — `website/index.html` and `docs/index.html` updated with v2.2.2 version references, download links, version-history entry, and emoji-free badges. `docs/support.html` email button emoji removed.
+- **Duplicate `require` calls removed** — approximately 15 inline `const { getDb } = require('./src/database')` calls in `server.js` consolidated to a single top-level import.
+- **package.json** version bumped to 2.2.3.
+
+---
+
+## [2.2.2] — 2026-02-21
+
+### Added
+- **FORCE_HTTP mode** — set `FORCE_HTTP=true` in `.env` to skip built-in SSL entirely, making reverse proxy setups (Caddy, nginx, Traefik) painless. Startup scripts also skip cert generation when enabled.
+- **Auto-assign default roles** — roles can now be flagged as auto-assign in the admin panel. Flagged roles are automatically given to new users on registration and when joining a channel.
+
+### Fixed
+- **Docker ARM build failing** — replaced QEMU-based cross-compilation with native ARM runners (`ubuntu-24.04-arm64`) and a manifest merge step so the multi-arch image builds reliably.
+- **HSTS header sent in HTTP mode** — Strict-Transport-Security is now disabled when FORCE_HTTP is active.
+- **window.app not exposed globally** — the main app instance is now assigned to `window.app`, fixing integration hooks.
+
+### Changed
+- Website & docs updated to v2.2.2.
+
+---
+
 ## [2.2.1] — 2026-02-21
 
 ### Fixed
@@ -76,10 +185,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 ### Added
 - **Discord history import — Direct Connect** — import your entire Discord server's message history directly into Haven. No external tools required. Built-in token retrieval instructions (Application tab → Local Storage method). Supports text channels, announcement channels, forum channels, media channels, threads (active + archived), and forum tags. Preserves messages, embeds, attachments, reactions, replies, pins, and Discord avatars.
 - **Discord history import — File upload** — alternatively upload a DiscordChatExporter JSON or ZIP archive to import channel history.
-- **Tabbed import modal** — the import dialog now has two tabs: 📁 Upload File and 🔗 Connect to Discord.
+- **Tabbed import modal** — the import dialog now has two tabs: Upload File and Connect to Discord.
 - **Discord avatar preservation** — imported messages display the original author's Discord avatar (CDN URL) instead of the Haven admin's avatar. New `webhook_avatar` database column.
 - **Full server structure import** — import fetches announcement (type 5), forum (type 15), and media (type 16) channels in addition to text channels. Threads (active + archived public) are nested under their parent channels. Forum tags are resolved and displayed.
-- **Channel type indicators** — import channel picker shows type icons: # text, 📢 announcement, 💬 forum, 🖼️ media, 🧵 thread.
+- **Channel type indicators** — import channel picker shows type icons: # text, announcement, forum, media, thread.
 
 ### Fixed
 - **E2E key loss on password change** — changing your password no longer orphans your encrypted DM key backup. The private key is now automatically re-wrapped with the new password and re-uploaded to the server, so login on new devices continues to work.
@@ -118,7 +227,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 
 ### Added
 - **Custom server emojis** — admins can upload PNG/GIF/WebP images as custom emojis (`:emoji_name:` syntax). Works in messages, reactions, and the emoji picker.
-- **Emoji quickbar customization** — click the ⚙️ gear icon on the reaction picker to swap any of the 8 quick-react slots with any emoji (including custom ones). Saved per-user in localStorage.
+- **Emoji quickbar customization** — click the gear icon on the reaction picker to swap any of the 8 quick-react slots with any emoji (including custom ones). Saved per-user in localStorage.
 - **DM deletion** — right-click (or click "...") on any DM conversation to delete it. Removes from your sidebar only.
 - **Reply banner click-to-scroll** — clicking the reply preview above a message now smooth-scrolls to the original message and highlights it briefly.
 - **Settings navigation sidebar** — the settings modal now has a left-side index with clickable categories (Layout, Sounds, Push, Password, and all admin subsections). Hidden on mobile.
@@ -128,7 +237,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 ### Fixed
 - **Docker entrypoint CRLF crash** — added `.gitattributes` to force LF line endings on shell scripts, plus a `sed` fallback in the Dockerfile.
 - **Quick emoji editor immediately closing** — click events inside the editor propagated to the document-level close handler. Added `stopPropagation()` to all interactive elements.
-- **Gear icon placement** — moved the ⚙️ customization button to the right of the "⋯" more-emojis button so frequent "..." clicks aren't blocked.
+- **Gear icon placement** — moved the customization button to the right of the "⋯" more-emojis button so frequent "..." clicks aren't blocked.
 
 ---
 
@@ -140,7 +249,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 - **One-click Windows launcher** — `Start Haven.bat` handles everything: detects Node.js, offers automatic install (downloads Node 22 LTS MSI via PowerShell), installs npm dependencies, generates SSL certs, starts the server, and opens the browser.
 - **Node.js auto-installer** (`install-node.ps1`) — PowerShell script that downloads and installs Node.js 22 LTS directly from nodejs.org. Pinned to v22 for native module compatibility.
 - **Full emoji reaction picker** — the quick-react bar now has a `⋯` button that opens a scrollable, searchable panel with all emoji categories (not just 8 quick emojis).
-- **Unified file upload button** — merged the image upload (landscape SVG) and file upload (paperclip) into one button. Images get queued with preview; other files upload immediately. Win95 theme shows 📎 instead of the SVG icon.
+- **Unified file upload button** — merged the image upload (landscape SVG) and file upload (paperclip) into one button. Images get queued with preview; other files upload immediately. Win95 theme shows instead of the SVG icon.
 - **Input actions toolbar** — upload, emoji, and GIF buttons are now wrapped in a bordered backdrop box with vertical dividers (matching the channel header actions style).
 - **Node.js version guard** — batch launcher and `package.json` engines field block Node ≥ 24 (where `better-sqlite3` prebuilt binaries don't exist yet).
 
@@ -195,7 +304,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 - **Carousel interval** — website hero image carousel slowed from 2s to 4s and uses fixed aspect ratio to prevent page jumping.
 
 ### Added
-- **E2E verification codes** — DM channels now show a 🔐 button in the header that displays a 60-digit safety number. Both users see the same code and can compare out-of-band to verify no one is intercepting their encrypted messages (like Signal).
+- **E2E verification codes** — DM channels now show a button in the header that displays a 60-digit safety number. Both users see the same code and can compare out-of-band to verify no one is intercepting their encrypted messages (like Signal).
 - **E2E per-account key sync** — private keys are now wrapped with the user's password (PBKDF2, 600k iterations) and stored encrypted on the server. Keys sync across devices automatically on login.
 - **Flash ROM download system** — server endpoints `/api/flash-rom-status` and `/api/install-flash-roms` allow checking and downloading Flash game ROMs on demand.
 - **Win95 theme: beveled buttons** — all voice, sidebar, modal, and toolbar buttons now have proper 3D outset/inset borders in the Win95 theme.
@@ -278,7 +387,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 ## [1.5.0] — 2026-02-14
 
 ### Added
-- **Private sub-channels** — when creating a sub-channel, a 🔒 Private checkbox is available. Private sub-channels only add the creator as initial member (not all parent members) and show a lock icon in the sidebar. Only users with the code can join.
+- **Private sub-channels** — when creating a sub-channel, a Private checkbox is available. Private sub-channels only add the creator as initial member (not all parent members) and show a lock icon in the sidebar. Only users with the code can join.
 - **Auto-join sub-channels** — when a user joins a parent channel, they're now automatically added to all non-private sub-channels of that parent. Previously, only users present at sub-channel creation were added.
 - **Create sub-channel modal** — replaced the basic browser `prompt()` with a proper modal dialog that includes a name field and private checkbox.
 - **Avatar system overhaul** — profile pictures now upload via HTTP (`/api/upload-avatar`) instead of Socket.io, fixing the silent disconnect caused by base64 data URLs exceeding Socket.io's 64KB buffer limit. Avatar shapes (circle, square, hexagon, diamond) are now stored per-user in the database and visible to all users in messages.
@@ -288,7 +397,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 - **Expanded scramble targets** — the text scramble effect now hits sidebar text, channel headers, user names, and section labels (not just the logo).
 
 ### Fixed
-- **Channel code settings gear icon never appearing** — `this.isAdmin` was used in 3 places but never defined; should have been `this.user.isAdmin`. The ⚙️ gear icon next to channel codes now correctly appears for admins.
+- **Channel code settings gear icon never appearing** — `this.isAdmin` was used in 3 places but never defined; should have been `this.user.isAdmin`. The gear icon next to channel codes now correctly appears for admins.
 - **`_setupStatusPicker` crash** — `insertBefore` was called on the wrong parent node, causing `Uncaught NotFoundError`. Fixed to use `currentUser.parentNode`.
 - **Messages breaking after avatar save** — root cause was Socket.io's `maxHttpBufferSize: 64KB` silently killing the connection when large base64 avatars were sent. Moved avatar upload to HTTP.
 - **Avatar resetting on reload** — avatars are now persisted server-side via HTTP upload and reloaded from the database on reconnect.
@@ -332,7 +441,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 - **Changelog dates from the future** — corrected twelve changelog entries that had dates of Feb 14–16 (future) or 2025 (wrong year). All dates now reflect their actual release day.
 
 ### Added
-- **PiP opacity slider** — music player and stream pop-out windows now have an opacity slider (👁 20–100%) so you can see through them while gaming or browsing. Preference is saved to localStorage.
+- **PiP opacity slider** — music player and stream pop-out windows now have an opacity slider (20–100%) so you can see through them while gaming or browsing. Preference is saved to localStorage.
 - **Spotify volume disclaimer** — when Spotify is the active music source, the Haven volume slider shows a tooltip indicating volume must be controlled within the Spotify embed (no external API available).
 
 ### Changed
@@ -405,12 +514,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 
 ### Added
 - **Independent voice & text channels** — voice and text are now fully decoupled, matching Discord's model. You can be in voice on one channel while reading/typing in another. Voice persists across text channel switches. The server uses dedicated `voice:<code>` socket.io rooms so voice signaling and updates reach participants regardless of which text channel they're viewing.
-- **Sidebar voice indicators** — channels with active voice users show a 🔊 count badge in the left sidebar, so you can see at a glance where people are talking without clicking into each channel.
+- **Sidebar voice indicators** — channels with active voice users show a count badge in the left sidebar, so you can see at a glance where people are talking without clicking into each channel.
 - **Roadmap section in README** — planned features (webhooks/bots, permission levels, threads, file sharing, E2EE) are now listed in a roadmap table.
 
 ### Fixed
 - **Mobile input field sizing** — shortened placeholder to "Message..." on narrow screens, reduced button sizes from 40 px to 34 px, tightened padding, and lowered the auto-resize cap to 90 px. The input no longer starts too small or jumps to an awkward height on tap.
-- **Mobile header voice overflow** — voice controls no longer wrap to a second line and get cut off. Removed `flex-wrap`, compacted button labels ("🎤▾" instead of "🎤 Voice ▾" on ≤ 768 px), and allowed the controls container to shrink.
+- **Mobile header voice overflow** — voice controls no longer wrap to a second line and get cut off. Removed `flex-wrap`, compacted button labels ("🎤▾" instead of "Voice ▾" on ≤ 768 px), and allowed the controls container to shrink.
 - **Voice updates reaching wrong clients** — `broadcastVoiceUsers` previously emitted only to the text-channel room (`channel:<code>`), so users in voice who had switched text channels missed updates. It now emits to both `voice:<code>` and `channel:<code>`.
 
 ---
@@ -418,8 +527,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 ## [1.4.0] — 2026-02-12
 
 ### Added
-- **Display name ≠ login name** — users now have a separate display name that is shown everywhere (messages, voice, leaderboards, online list). The login username is set at registration and never changes, so nobody forgets their credentials. Display names allow spaces, don't need to be unique, and can be changed at will via the ✏️ button. The immutable login name is shown as a small `@username` subtitle in the sidebar.
-- **Mobile voice join** — "🎤 Join Voice" button added to the right-sidebar users panel, accessible on phones where the header voice button is hidden.
+- **Display name ≠ login name** — users now have a separate display name that is shown everywhere (messages, voice, leaderboards, online list). The login username is set at registration and never changes, so nobody forgets their credentials. Display names allow spaces, don't need to be unique, and can be changed at will via the button. The immutable login name is shown as a small `@username` subtitle in the sidebar.
+- **Mobile voice join** — "Join Voice" button added to the right-sidebar users panel, accessible on phones where the header voice button is hidden.
 
 ### Fixed
 - **Mobile viewport — message input visible** — switched from `100vh` (which doesn't account for browser chrome) to `100dvh` (dynamic viewport height). The text input no longer hides behind the phone's URL bar.
@@ -450,9 +559,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 
 ### Added
 - **In-game leaderboard** — the Shippy Container game now shows a live leaderboard panel beside the canvas, updated on launch and after every run. The old sidebar leaderboard button and modal are removed.
-- **High-score announcements** — when a player beats their personal best, a 🏆 status toast is broadcast to the channel.
-- **Voice controls dropdown** — mute, deafen, screen share, and noise suppression are tucked behind a single "🎤 Voice ▾" button; a compact "✕" leave button stays visible. Keeps the header clean.
-- **5 new themes** — Dark Souls 🔥, Elden Ring 💍, Minecraft ⛏️, Final Fantasy X ⚔️, and Legend of Zelda 🗡️ join the theme picker.
+- **High-score announcements** — when a player beats their personal best, a status toast is broadcast to the channel.
+- **Voice controls dropdown** — mute, deafen, screen share, and noise suppression are tucked behind a single "Voice ▾" button; a compact "✕" leave button stays visible. Keeps the header clean.
+- **5 new themes** — Dark Souls 🔥, Elden Ring 💍, Minecraft ⛏️, Final Fantasy X ⚔️, and Legend of Zelda join the theme picker.
 - **Themed slider fills** — all range sliders (volume, noise suppression, stream size) now fill their left portion with accent-colored gradients and glow effects that match the active theme.
 
 ---
@@ -492,16 +601,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 - **Custom theme overhaul** — the triangle colour picker now dramatically affects the entire UI. Backgrounds, text, borders, links, glow effects, and even success/danger/warning colours are all derived from the chosen hue. The `vibrancy` parameter (used internally) controls how saturated the backgrounds and text become — the triangle’s saturation/value selection now produces visibly different themes instead of only tweaking subtle highlights.
 
 ### Added
-- **RGB cycling theme** — new 🌈 RGB button in the theme selector. Continuously shifts the entire UI through all hues like gaming RGB peripherals. Two sliders control **Speed** (how fast it cycles) and **Vibrancy** (how saturated/tinted the backgrounds and text become). Settings persist in localStorage.
+- **RGB cycling theme** — new RGB button in the theme selector. Continuously shifts the entire UI through all hues like gaming RGB peripherals. Two sliders control **Speed** (how fast it cycles) and **Vibrancy** (how saturated/tinted the backgrounds and text become). Settings persist in localStorage.
 
 ---
 
 ## [1.3.4] — 2026-02-12
 
 ### Added
-- **Noise suppression (noise gate)** — Web Audio noise gate silences background noise (keyboard, fans, breathing) before sending audio to peers. Runs at 20 ms polling with fast 15 ms attack / gentle 120 ms release. Toggle on/off with the 🤫 NS button in voice controls (enabled by default).
+- **Noise suppression (noise gate)** — Web Audio noise gate silences background noise (keyboard, fans, breathing) before sending audio to peers. Runs at 20 ms polling with fast 15 ms attack / gentle 120 ms release. Toggle on/off with the NS button in voice controls (enabled by default).
 - **Persistent voice across channels** — joining voice in one channel no longer disconnects when switching text channels. A pulsing green voice bar in the sidebar shows which channel you're connected to, with a quick-disconnect button. Voice controls dynamically show/hide based on whether the active text channel matches your voice channel.
-- **Server leaderboard** — new 🏆 Leaderboard button in the sidebar opens a modal showing the top 20 Shippy Container scores server-wide, complete with medal indicators for the top 3.
+- **Server leaderboard** — new Leaderboard button in the sidebar opens a modal showing the top 20 Shippy Container scores server-wide, complete with medal indicators for the top 3.
 
 ### Fixed
 - **Shippy Container frame-rate physics** — game physics normalised to a 60 fps baseline using delta-time scaling. Players on 144 Hz (or any refresh rate) monitors now experience identical gravity, pipe speed, and spawn timing as 60 Hz players. Pipe spawning switched from frame-count based (every 90 frames) to time-based (every 1.5 s). Scale capped at 3× to prevent teleportation on tab-switch.
@@ -514,13 +623,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 - **Upload error handling** — both image and file upload handlers now check HTTP status before parsing JSON, giving users clear error messages instead of cryptic "Not Found" toasts.
 - **Screen share X button** — clicking close now minimises the screen-share container instead of destroying all streams. A pulsing indicator button appears in the channel header so you can bring the view back. New incoming streams auto-restore the container.
 - **Online users visibility** — users are now visible across all channels as soon as they connect, not only in the specific channel they are currently viewing. Disconnect events broadcast to all active channels.
-- **DM button feedback** — clicking 💬 now shows a toast ("Opening DM with …"), disables the button during the request, scrolls the sidebar to the newly-opened DM channel, and re-enables after a timeout fallback.
+- **DM button feedback** — clicking now shows a toast ("Opening DM with …"), disables the button during the request, scrolls the sidebar to the newly-opened DM channel, and re-enables after a timeout fallback.
 
 ### Changed
 - **Tenor → GIPHY migration** — GIF search backend and client switched from Tenor (Google) to GIPHY. New admin setup guide, server proxy endpoints, and response parsing. All `media.tenor.com` URL patterns updated to `media*.giphy.com`. README updated with simpler GIPHY key setup instructions.
 
 ### Added
-- **Custom theme with triangle picker** — new 🎨 "Custom" button in the theme selector. Opens an inline HSV triangle colour picker (canvas-based hue bar + SV triangle) that live-generates a full theme palette from a single accent colour. Custom HSV values persist in localStorage and apply instantly on page load (no flash).
+- **Custom theme with triangle picker** — new "Custom" button in the theme selector. Opens an inline HSV triangle colour picker (canvas-based hue bar + SV triangle) that live-generates a full theme palette from a single accent colour. Custom HSV values persist in localStorage and apply instantly on page load (no flash).
 
 ---
 
@@ -535,7 +644,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 - **Account enumeration mitigated** — registration endpoint no longer reveals whether a username is already taken.
 
 ### Added — Quality of Life
-- **Password change from settings** — new 🔒 Password section in the settings modal lets users change their password (current → new → confirm) without logging out. Backend `POST /api/auth/change-password` issues a fresh JWT on success.
+- **Password change from settings** — new Password section in the settings modal lets users change their password (current → new → confirm) without logging out. Backend `POST /api/auth/change-password` issues a fresh JWT on success.
 - **Emoji picker upgrade** — categorized tabs (Smileys, People, Animals, Food, Activities, Travel, Objects, Symbols), search bar, scrollable grid with 280+ emojis. Replaces the old flat 40-emoji palette.
 - **`/butt` slash command** — `( . )( . )` — companion to `/boobs`.
 
@@ -561,7 +670,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 ## [1.3.0] — 2026-02-12
 
 ### Added — Direct Messages
-- **Private 1-on-1 conversations** — click 💬 on any user in the member list to open a DM.
+- **Private 1-on-1 conversations** — click on any user in the member list to open a DM.
 - DMs appear in a separate "Direct Messages" section in the sidebar.
 - If a DM already exists with that user, it reopens instead of creating a duplicate.
 - Both users are notified in real-time when a DM is created.
@@ -667,7 +776,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Haven uses [Sema
 
 ## [1.1.0] — 2026-02-11
 
-### 🔒 Data Isolation
+### Data Isolation
 
 All user data now lives **outside** the Haven code directory, making it physically impossible to accidentally commit or share personal data.
 
@@ -690,7 +799,7 @@ All user data now lives **outside** the Haven code directory, making it physical
 
 ## [1.0.0] — 2026-02-10
 
-### 🎉 First Public Release
+### First Public Release
 
 Haven is now ready for public use. This release includes all features from the alpha series plus security hardening and polish for distribution.
 
@@ -708,7 +817,7 @@ Haven is now ready for public use. This release includes all features from the a
 - `/clear` — Clear your chat view (local only).
 
 ### Added — Message Search
-- **Ctrl+F** or 🔍 button opens a search bar in the channel header.
+- **Ctrl+F** or button opens a search bar in the channel header.
 - Results panel with highlighted matches.
 - Click a result to scroll to that message with a flash animation.
 
@@ -746,7 +855,7 @@ Haven is now ready for public use. This release includes all features from the a
 - **Curated set** — 40 of the most useful emojis across smileys, gestures, objects, and symbols.
 
 ### Added — Message Reactions
-- **Hover toolbar** — hover any message to see React 😀 and Reply ↩️ buttons.
+- **Hover toolbar** — hover any message to see React and Reply ↩️ buttons.
 - **Quick-pick palette** — click React to get a fast 8-emoji picker (👍👎😂❤️🔥💯😮😢).
 - **Toggle reactions** — click an existing reaction badge to add/remove your own reaction.
 - **"Own" highlight** — reactions you've placed are visually highlighted with accent color.
@@ -765,7 +874,7 @@ Haven is now ready for public use. This release includes all features from the a
 ### Added — Reply to Messages
 - **Reply button** — hover any message and click ↩️ to reply.
 - **Reply bar** — preview bar appears above the input showing who/what you're replying to.
-- **Cancel reply** — click ✕ on the reply bar to clear.
+- **Cancel reply** — click on the reply bar to clear.
 - **Reply context** — replied messages show a colored banner above them linking back to the original.
 - **Threaded feel** — replies group visually with the parent message's author color.
 - **Persistent** — `reply_to` column in messages table; reply context survives reloads.

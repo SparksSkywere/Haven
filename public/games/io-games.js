@@ -31,7 +31,7 @@ const searchInput = document.getElementById('io-search');
 
 function renderGames(filter) {
   filter = filter || '';
-  grid.innerHTML = '';
+  grid.textContent =  '';
   const f = filter.toLowerCase();
   const filtered = IO_GAMES.filter(function(g) {
     return g.name.toLowerCase().includes(f) ||
@@ -42,7 +42,7 @@ function renderGames(filter) {
   for (const game of filtered) {
     const card = document.createElement('div');
     card.className = 'io-card';
-    card.innerHTML =
+    card._safeHTML =
       '<div class="io-card-icon">' + game.icon + '</div>' +
       '<div class="io-card-name">' + game.name + '</div>' +
       '<div class="io-card-desc">' + game.desc + '</div>' +
@@ -54,7 +54,7 @@ function renderGames(filter) {
   }
 
   if (filtered.length === 0) {
-    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#8b949e;padding:40px;">No games match your search</div>';
+    grid._safeHTML = '<div style="grid-column:1/-1;text-align:center;color:#8b949e;padding:40px;">No games match your search</div>';
   }
 }
 

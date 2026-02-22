@@ -1,6 +1,6 @@
 const { verifyToken, generateChannelCode, generateToken } = require('./auth');
 const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
+// Removed unused import: bcrypt
 const webpush = require('web-push');
 const HAVEN_VERSION = require('../package.json').version;
 
@@ -178,30 +178,13 @@ function setupSocketHandlers(io, db) {
     const user = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(userId);
     if (user && user.is_admin) return 100;
 
-    // Check server-scoped roles first (highest level wins)
-    const serverRole = db.prepare(`
+    // Get the highest level from user's roles
+    const role = db.prepare(`
       SELECT MAX(r.level) as maxLevel FROM roles r
       JOIN user_roles ur ON r.id = ur.role_id
-      WHERE ur.user_id = ? AND r.scope = 'server' AND ur.channel_id IS NULL
+      WHERE ur.user_id = ?
     `).get(userId);
-    let level = (serverRole && serverRole.maxLevel) || 0;
-
-    // If channel specified, check roles for the channel + parent (inheritance)
-    if (channelId) {
-      const chain = getChannelRoleChain(channelId);
-      if (chain.length > 0) {
-        const placeholders = chain.map(() => '?').join(',');
-        const channelRole = db.prepare(`
-          SELECT MAX(r.level) as maxLevel FROM roles r
-          JOIN user_roles ur ON r.id = ur.role_id
-          WHERE ur.user_id = ? AND ur.channel_id IN (${placeholders})
-        `).get(userId, ...chain);
-        if (channelRole && channelRole.maxLevel && channelRole.maxLevel > level) {
-          level = channelRole.maxLevel;
-        }
-      }
-    }
-    return level;
+    return (role && role.maxLevel) || 1; // Default level 1 for users
   }
 
   function getPermissionThresholds() {
@@ -223,31 +206,20 @@ function setupSocketHandlers(io, db) {
       if (level >= thresholds[permission]) return true;
     }
 
-    // Check server-scoped roles
-    const serverPerm = db.prepare(`
-      SELECT rp.allowed FROM role_permissions rp
-      JOIN roles r ON rp.role_id = r.id
+    // Get user's roles and their permissions
+    const rows = db.prepare(`
+      SELECT r.permissions FROM roles r
       JOIN user_roles ur ON r.id = ur.role_id
-      WHERE ur.user_id = ? AND rp.permission = ? AND r.scope = 'server' AND ur.channel_id IS NULL AND rp.allowed = 1
-      LIMIT 1
-    `).get(userId, permission);
-    if (serverPerm) return true;
-
-    // Check channel-scoped roles (with inheritance: parent channel roles cascade to subs)
-    if (channelId) {
-      const chain = getChannelRoleChain(channelId);
-      if (chain.length > 0) {
-        const placeholders = chain.map(() => '?').join(',');
-        const channelPerm = db.prepare(`
-          SELECT rp.allowed FROM role_permissions rp
-          JOIN roles r ON rp.role_id = r.id
-          JOIN user_roles ur ON r.id = ur.role_id
-          WHERE ur.user_id = ? AND rp.permission = ? AND ur.channel_id IN (${placeholders}) AND rp.allowed = 1
-          LIMIT 1
-        `).get(userId, permission, ...chain);
-        if (channelPerm) return true;
+      WHERE ur.user_id = ?
+    `).all(userId);
+    
+    for (const row of rows) {
+      if (row.permissions) {
+        const rolePerms = JSON.parse(row.permissions);
+        if (rolePerms.includes(permission)) return true;
       }
     }
+
     return false;
   }
 
@@ -255,29 +227,35 @@ function setupSocketHandlers(io, db) {
     const user = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(userId);
     if (user && user.is_admin) return ['*']; // admin has all
     const rows = db.prepare(`
-      SELECT DISTINCT rp.permission FROM role_permissions rp
-      JOIN roles r ON rp.role_id = r.id
+      SELECT DISTINCT r.permissions FROM roles r
       JOIN user_roles ur ON r.id = ur.role_id
-      WHERE ur.user_id = ? AND rp.allowed = 1
+      WHERE ur.user_id = ?
     `).all(userId);
-    const perms = rows.map(r => r.permission);
+    const perms = [];
+    for (const row of rows) {
+      if (row.permissions) {
+        const rolePerms = JSON.parse(row.permissions);
+        perms.push(...rolePerms);
+      }
+    }
+    // Remove duplicates
+    const uniquePerms = [...new Set(perms)];
 
     // Add permissions from level thresholds
     const thresholds = getPermissionThresholds();
     const level = getUserEffectiveLevel(userId);
     for (const [perm, minLevel] of Object.entries(thresholds)) {
-      if (level >= minLevel && !perms.includes(perm)) perms.push(perm);
+      if (level >= minLevel && !uniquePerms.includes(perm)) uniquePerms.push(perm);
     }
     return perms;
   }
 
   function getUserRoles(userId) {
     return db.prepare(`
-      SELECT r.id, r.name, r.level, r.scope, r.color, ur.channel_id
+      SELECT r.id, r.name, r.level, r.color, r.guild_id
       FROM roles r
       JOIN user_roles ur ON r.id = ur.role_id
       WHERE ur.user_id = ?
-      GROUP BY r.id, COALESCE(ur.channel_id, -1)
       ORDER BY r.level DESC
     `).all(userId);
   }
@@ -286,26 +264,14 @@ function setupSocketHandlers(io, db) {
     const user = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(userId);
     if (user && user.is_admin) return { name: 'Admin', level: 100, color: '#e74c3c' };
 
-    let role = db.prepare(`
+    // Get the highest level role for this user
+    const role = db.prepare(`
       SELECT r.name, r.level, r.color FROM roles r
       JOIN user_roles ur ON r.id = ur.role_id
-      WHERE ur.user_id = ? AND r.scope = 'server' AND ur.channel_id IS NULL
+      WHERE ur.user_id = ?
       ORDER BY r.level DESC LIMIT 1
     `).get(userId);
 
-    if (channelId) {
-      const chain = getChannelRoleChain(channelId);
-      if (chain.length > 0) {
-        const placeholders = chain.map(() => '?').join(',');
-        const chRole = db.prepare(`
-          SELECT r.name, r.level, r.color FROM roles r
-          JOIN user_roles ur ON r.id = ur.role_id
-          WHERE ur.user_id = ? AND ur.channel_id IN (${placeholders})
-          ORDER BY r.level DESC LIMIT 1
-        `).get(userId, ...chain);
-        if (chRole && (!role || chRole.level > role.level)) role = chRole;
-      }
-    }
     return role || null;
   }
 
@@ -612,17 +578,28 @@ function setupSocketHandlers(io, db) {
     });
 
     // ── Helper: get enriched channel list for a user ───────
-    function getEnrichedChannels(userId, isAdmin, joinRooms) {
-      const channels = db.prepare(`
-        SELECT c.id, c.name, c.code, c.created_by, c.topic, c.is_dm,
+    function getEnrichedChannels(userId, isAdmin, joinRooms, guildId = null) {
+      // Build query with optional server filtering
+      let query = `
+        SELECT c.id, c.name, c.code, c.created_by, c.topic, c.is_dm, c.guild_id,
                c.code_visibility, c.code_mode, c.code_rotation_type, c.code_rotation_interval,
                c.parent_channel_id, c.position, c.is_private,
                c.streams_enabled, c.music_enabled, c.slow_mode_interval, c.category, c.sort_alphabetical
         FROM channels c
         JOIN channel_members cm ON c.id = cm.channel_id
-        WHERE cm.user_id = ?
-        ORDER BY c.is_dm, c.position, c.name
-      `).all(userId);
+        WHERE cm.user_id = ?`;
+      
+      const params = [userId];
+      
+      // Filter by guild if provided
+      if (guildId !== null) {
+        query += ' AND c.guild_id = ?';
+        params.push(guildId);
+      }
+      
+      query += ' ORDER BY c.is_dm, c.position, c.name';
+      
+      const channels = db.prepare(query).all(...params);
 
       if (channels.length > 0) {
         const channelIds = channels.map(c => c.id);
@@ -689,20 +666,92 @@ function setupSocketHandlers(io, db) {
     }
 
     // ── Get user's channels ─────────────────────────────────
-    socket.on('get-channels', () => {
+    socket.on('get-channels', (data) => {
+      // Support filtering by guild_id for Discord-like functionality
+      const guildId = data && typeof data.guild_id === 'number' ? data.guild_id : null;
+      
       const channels = getEnrichedChannels(
         socket.user.id,
         socket.user.isAdmin,
-        (room) => socket.join(room)
+        (room) => socket.join(room),
+        guildId
       );
       socket.emit('channels-list', channels);
     });
 
-    // ── Create channel (permission-based) ─────────────────
+    // ── Get user's guilds (Discord-like) ───────────────────
+    socket.on('get-guilds', () => {
+      try {
+        const guilds = db.prepare(`
+          SELECT g.* FROM guilds g
+          INNER JOIN guild_members gm ON g.id = gm.guild_id
+          WHERE gm.user_id = ?
+          ORDER BY g.created_at ASC
+        `).all(socket.user.id);
+        
+        // Join guild rooms
+        guilds.forEach(g => socket.join(`guild:${g.id}`));
+        
+        socket.emit('guilds-list', guilds);
+      } catch (err) {
+        console.error('Get guilds error:', err);
+        socket.emit('error-msg', 'Failed to load guilds');
+      }
+    });
+    
+    // ── Switch to guild (get channels for specific guild) ─
+    socket.on('switch-guild', (data) => {
+      if (!data || typeof data.guild_id !== 'number') return;
+      
+      try {
+        // Verify user is member
+        const member = db.prepare(
+          'SELECT 1 FROM guild_members WHERE guild_id = ? AND user_id = ?'
+        ).get(data.guild_id, socket.user.id);
+        
+        if (!member) {
+          return socket.emit('error-msg', 'Not a member of this guild');
+        }
+        
+        // Get channels for this guild
+        const channels = getEnrichedChannels(
+          socket.user.id,
+          socket.user.isAdmin,
+          (room) => socket.join(room),
+          data.guild_id
+        );
+        
+        socket.emit('guild-switched', {
+          guild_id: data.guild_id,
+          channels
+        });
+      } catch (err) {
+        console.error('Switch guild error:', err);
+        socket.emit('error-msg', 'Failed to switch guild');
+      }
+    });
+
+    // ── Create channel (Discord-like - any guild member can create) ─────────────────
     socket.on('create-channel', (data) => {
       if (!data || typeof data !== 'object') return;
-      if (!userHasPermission(socket.user.id, 'create_channel')) {
+      
+      // Get guild_id from data (required for Discord-like functionality)
+      const guildId = typeof data.guild_id === 'number' ? data.guild_id : null;
+      
+      // If no guild_id provided, check old permission system for backwards compatibility
+      if (!guildId && !userHasPermission(socket.user.id, 'create_channel')) {
         return socket.emit('error-msg', 'You don\'t have permission to create channels');
+      }
+      
+      // If guild_id provided, verify user is a member of that guild
+      if (guildId) {
+        const guildMember = db.prepare(
+          'SELECT 1 FROM guild_members WHERE guild_id = ? AND user_id = ?'
+        ).get(guildId, socket.user.id);
+        
+        if (!guildMember) {
+          return socket.emit('error-msg', 'You are not a member of this guild');
+        }
       }
 
       const name = typeof data.name === 'string' ? data.name.trim() : '';
@@ -720,9 +769,14 @@ function setupSocketHandlers(io, db) {
       const code = generateChannelCode();
 
       try {
-        const result = db.prepare(
-          'INSERT INTO channels (name, code, created_by) VALUES (?, ?, ?)'
-        ).run(name.trim(), code, socket.user.id);
+        // Insert with guild_id if provided
+        const result = guildId 
+          ? db.prepare(
+              'INSERT INTO channels (guild_id, name, code, created_by) VALUES (?, ?, ?, ?)'
+            ).run(guildId, name.trim(), code, socket.user.id)
+          : db.prepare(
+              'INSERT INTO channels (name, code, created_by) VALUES (?, ?, ?)'
+            ).run(name.trim(), code, socket.user.id);
 
         // Auto-join creator
         db.prepare(
@@ -731,6 +785,7 @@ function setupSocketHandlers(io, db) {
 
         const channel = {
           id: result.lastInsertRowid,
+          guild_id: guildId,
           name: name.trim(),
           code,
           display_code: code,
@@ -741,6 +796,11 @@ function setupSocketHandlers(io, db) {
 
         socket.join(`channel:${code}`);
         socket.emit('channel-created', channel);
+        
+        // Notify other guild members of new channel
+        if (guildId) {
+          io.to(`guild:${guildId}`).emit('guild-channel-added', channel);
+        }
       } catch (err) {
         console.error('Create channel error:', err);
         socket.emit('error-msg', 'Failed to create channel');
@@ -3611,13 +3671,9 @@ function setupSocketHandlers(io, db) {
 
     socket.on('get-roles', (data, callback) => {
       const roles = db.prepare('SELECT *, auto_assign FROM roles ORDER BY level DESC').all();
-      const permissions = db.prepare('SELECT * FROM role_permissions').all();
-      const permMap = {};
-      permissions.forEach(p => {
-        if (!permMap[p.role_id]) permMap[p.role_id] = [];
-        permMap[p.role_id].push(p.permission);
+      roles.forEach(r => { 
+        r.permissions = r.permissions ? JSON.parse(r.permissions) : []; 
       });
-      roles.forEach(r => { r.permissions = permMap[r.id] || []; });
       if (typeof callback === 'function') callback({ roles });
       else if (typeof data === 'function') data({ roles }); // handle emit('get-roles', callback)
       else socket.emit('roles-list', roles);
@@ -3701,28 +3757,27 @@ function setupSocketHandlers(io, db) {
       if (!name) return cb({ error: 'Role name required (1-30 chars)' });
 
       const level = isInt(data.level) && data.level >= 1 && data.level <= 99 ? data.level : 25;
-      const scope = data.scope === 'channel' ? 'channel' : 'server';
       const color = isString(data.color, 4, 7) ? data.color : null;
       const autoAssign = data.autoAssign ? 1 : 0;
+      const guildId = data.guildId || 1; // Default to first guild
+
+      // Validate permissions
+      const perms = Array.isArray(data.permissions) ? data.permissions : [];
+      const validPerms = [
+        'kick_user', 'mute_user', 'ban_user', 'delete_message', 'delete_own_messages',
+        'delete_lower_messages', 'edit_own_messages', 'pin_message', 'set_channel_topic',
+        'manage_sub_channels', 'rename_channel', 'rename_sub_channel',
+        'upload_files', 'use_voice', 'manage_webhooks', 'mention_everyone', 'view_history',
+        'promote_user', 'transfer_admin', 'manage_roles'
+      ];
+      const filteredPerms = perms.filter(p => validPerms.includes(p));
 
       try {
         // If marking this role as auto-assign, clear any existing auto-assign roles first
         if (autoAssign) {
-          db.prepare('UPDATE roles SET auto_assign = 0').run();
+          db.prepare('UPDATE roles SET auto_assign = 0 WHERE guild_id = ?').run(guildId);
         }
-        const result = db.prepare('INSERT INTO roles (name, level, scope, color, auto_assign) VALUES (?, ?, ?, ?, ?)').run(name, level, scope, color, autoAssign);
-
-        // Add permissions
-        const perms = Array.isArray(data.permissions) ? data.permissions : [];
-        const validPerms = [
-          'kick_user', 'mute_user', 'ban_user', 'delete_message', 'delete_own_messages',
-          'delete_lower_messages', 'edit_own_messages', 'pin_message', 'set_channel_topic',
-          'manage_sub_channels', 'rename_channel', 'rename_sub_channel',
-          'upload_files', 'use_voice', 'manage_webhooks', 'mention_everyone', 'view_history',
-          'promote_user', 'transfer_admin'
-        ];
-        const insertPerm = db.prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission, allowed) VALUES (?, ?, 1)');
-        perms.forEach(p => { if (validPerms.includes(p)) insertPerm.run(result.lastInsertRowid, p); });
+        const result = db.prepare('INSERT INTO roles (guild_id, name, level, color, permissions, auto_assign) VALUES (?, ?, ?, ?, ?, ?)').run(guildId, name, level, color, JSON.stringify(filteredPerms), autoAssign);
 
         cb({ success: true, roleId: result.lastInsertRowid });
       } catch (err) {
@@ -3751,14 +3806,9 @@ function setupSocketHandlers(io, db) {
       if (data.autoAssign !== undefined) {
         // If enabling auto-assign, clear all other roles' auto_assign first
         if (data.autoAssign) {
-          db.prepare('UPDATE roles SET auto_assign = 0').run();
+          db.prepare('UPDATE roles SET auto_assign = 0 WHERE guild_id = ?').run(role.guild_id);
         }
         updates.push('auto_assign = ?'); values.push(data.autoAssign ? 1 : 0);
-      }
-
-      if (updates.length > 0) {
-        values.push(roleId);
-        db.prepare(`UPDATE roles SET ${updates.join(', ')} WHERE id = ?`).run(...values);
       }
 
       // Update permissions
@@ -3768,11 +3818,15 @@ function setupSocketHandlers(io, db) {
           'delete_lower_messages', 'edit_own_messages', 'pin_message', 'set_channel_topic',
           'manage_sub_channels', 'rename_channel', 'rename_sub_channel',
           'upload_files', 'use_voice', 'manage_webhooks', 'mention_everyone', 'view_history',
-          'promote_user', 'transfer_admin'
+          'promote_user', 'transfer_admin', 'manage_roles'
         ];
-        db.prepare('DELETE FROM role_permissions WHERE role_id = ?').run(roleId);
-        const insertPerm = db.prepare('INSERT INTO role_permissions (role_id, permission, allowed) VALUES (?, ?, 1)');
-        data.permissions.forEach(p => { if (validPerms.includes(p)) insertPerm.run(roleId, p); });
+        const filteredPerms = data.permissions.filter(p => validPerms.includes(p));
+        updates.push('permissions = ?'); values.push(JSON.stringify(filteredPerms));
+      }
+
+      if (updates.length > 0) {
+        values.push(roleId);
+        db.prepare(`UPDATE roles SET ${updates.join(', ')} WHERE id = ?`).run(...values);
       }
 
       // Refresh all online users' role data
@@ -3789,7 +3843,6 @@ function setupSocketHandlers(io, db) {
       if (!roleId) return;
 
       db.prepare('DELETE FROM user_roles WHERE role_id = ?').run(roleId);
-      db.prepare('DELETE FROM role_permissions WHERE role_id = ?').run(roleId);
       db.prepare('DELETE FROM roles WHERE id = ?').run(roleId);
       // Refresh all online users' role data
       for (const [code] of channelUsers) { emitOnlineUsers(code); }

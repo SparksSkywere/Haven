@@ -85,7 +85,6 @@ class HavenE2E {
         this._keyPair = await this._generate();
         await this._saveLocal(this._keyPair);
         this._freshlyGenerated = true;
-        console.log('[E2E] Generated new key pair (first-time setup)');
       }
 
       /* 4. Auto-login without IndexedDB — E2E unavailable until real login */
@@ -113,7 +112,6 @@ class HavenE2E {
       }
 
       this._ready = true;
-      console.log('[E2E] Ready');
       return true;
     } catch (err) {
       console.error('[E2E] Init failed:', err);
@@ -136,7 +134,6 @@ class HavenE2E {
       await this._uploadBackup(socket, wrappingKey);
       this._ready = true;
       this._keysWereReset = true;
-      console.log('[E2E] Keys reset');
       return true;
     } catch (err) {
       console.warn('[E2E] Reset failed:', err.message);
@@ -397,7 +394,6 @@ class HavenE2E {
       const jwk = await this._unwrap(secret, backup.encryptedKey, backup.salt);
       const pair = await this._importPair(jwk);
       await this._saveLocal(pair);
-      console.log('[E2E] Restored from server backup');
       return pair;
     } catch {
       console.warn('[E2E] Server backup unwrap failed — keys NOT auto-regenerated to protect other devices');
@@ -430,7 +426,6 @@ class HavenE2E {
       await this._saveLocal(this._keyPair);
       this._publicKeyJwk = await crypto.subtle.exportKey('jwk', this._keyPair.publicKey);
       this._ready = true;
-      console.log('[E2E] Synced keys from server backup');
       return true;
     } catch (err) {
       console.warn('[E2E] Sync from server failed:', err.message);

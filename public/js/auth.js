@@ -1,14 +1,28 @@
 // ── Auth Page Logic (with theme support) ─────────────────
 
 (function () {
-  // If already logged in, redirect to app
+  // Capture invite code from URL (e.g. /?invite=CODE or /invite/CODE redirect)
+  const _urlParams = new URLSearchParams(window.location.search);
+  const _inviteCode = _urlParams.get('invite') || '';
+  const _appRedirect = _inviteCode ? `/app?invite=${encodeURIComponent(_inviteCode)}` : '/app';
+
+  // If already logged in, redirect to app (preserving invite code)
   if (localStorage.getItem('haven_token')) {
-    window.location.href = '/app';
+    window.location.href = _appRedirect;
     return;
   }
 
   // ── E2E wrapping key derivation (mirrors HavenE2E.deriveWrappingKey) ───
+  // crypto.subtle is only available in Secure Contexts (HTTPS or localhost).
+  // On plain HTTP with a non-localhost host we skip E2E key derivation so
+  // login / register still works; E2E DMs will be unavailable until HTTPS.
+  const _cryptoAvailable = !!(crypto && crypto.subtle);
+
   async function deriveE2EWrappingKey(password) {
+    if (!_cryptoAvailable) {
+      console.warn('[Haven] crypto.subtle unavailable (non-secure context) — E2E wrapping key skipped');
+      return null;
+    }
     const enc = new TextEncoder();
     const raw = await crypto.subtle.importKey(
       'raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']
@@ -128,13 +142,14 @@
 
       // Derive E2E wrapping key from password (client-side only, never sent to server)
       const e2eWrap = await deriveE2EWrappingKey(password);
-      sessionStorage.setItem('haven_e2e_wrap', e2eWrap);
+      if (e2eWrap) sessionStorage.setItem('haven_e2e_wrap', e2eWrap);
 
       localStorage.setItem('haven_token', data.token);
       localStorage.setItem('haven_user', JSON.stringify(data.user));
       localStorage.setItem('haven_eula_accepted', '2.0');
-      window.location.href = '/app';
+      window.location.href = _appRedirect;
     } catch (err) {
+      console.error('[Haven] Login error:', err);
       showError('Connection error — is the server running?');
     }
   });
@@ -151,7 +166,7 @@
 
     if (!username || !password || !confirm) return showError('Fill in all fields');
     if (password !== confirm) return showError('Passwords do not match');
-    if (password.length < 6) return showError('Password must be at least 6 characters');
+    if (password.length < 8) return showError('Password must be at least 8 characters');
 
     try {
       const res = await fetch('/api/auth/register', {
@@ -165,13 +180,14 @@
 
       // Derive E2E wrapping key from password (client-side only, never sent to server)
       const e2eWrap = await deriveE2EWrappingKey(password);
-      sessionStorage.setItem('haven_e2e_wrap', e2eWrap);
+      if (e2eWrap) sessionStorage.setItem('haven_e2e_wrap', e2eWrap);
 
       localStorage.setItem('haven_token', data.token);
       localStorage.setItem('haven_user', JSON.stringify(data.user));
       localStorage.setItem('haven_eula_accepted', '2.0');
-      window.location.href = '/app';
+      window.location.href = _appRedirect;
     } catch (err) {
+      console.error('[Haven] Register error:', err);
       showError('Connection error — is the server running?');
     }
   });

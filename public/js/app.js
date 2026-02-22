@@ -40,6 +40,7 @@ class HavenApp {
     this._pendingKeyReqs = {};     // userId → [resolve] for promise-based partner key fetch
     this._pendingE2ENotice = null; // E2E notice text to re-append after message re-render
     this._oldestMsgId = null;      // oldest message ID in current view (for pagination)
+    this._currentThreadId = null;  // currently open thread root message ID
     this._noMoreHistory = false;   // true when all history has been loaded
     this._loadingHistory = false;  // prevent concurrent history requests
     this._historyBefore = null;    // set when requesting older messages
@@ -64,7 +65,7 @@ class HavenApp {
       { cmd: 'flip',       args: '',         desc: 'Flip a coin: heads or tails' },
       { cmd: 'roll',       args: '[NdN]',    desc: 'Roll dice (e.g. /roll 2d6)' },
       { cmd: 'hug',        args: '<@user>',  desc: 'Send a hug to someone' },
-      { cmd: 'wave',       args: '[text]',   desc: 'Wave at the chat 👋' },
+      { cmd: 'wave',       args: '[text]',   desc: 'Wave at the chat' },
       { cmd: 'play',       args: '<name or url>',    desc: 'Search & play music (e.g. /play Cut Your Teeth Kygo)' },
       { cmd: 'gif',        args: '<query>',  desc: 'Search & send a GIF inline (e.g. /gif thumbs up)' },
     ];
@@ -109,6 +110,9 @@ class HavenApp {
     this._canModerate = () => this.user.isAdmin || (this.user.effectiveLevel || 0) >= 25;
     this._isServerMod = () => this.user.isAdmin || (this.user.effectiveLevel || 0) >= 50;
     this._hasPerm = (p) => this.user.isAdmin || (this.user.permissions || []).includes('*') || (this.user.permissions || []).includes(p);
+    // Discord-style: channel creator can manage their own channels
+    this._isChannelOwner = (ch) => ch && ch.created_by === this.user.id;
+    this._canManageChannel = (ch) => this.user.isAdmin || this._isChannelOwner(ch);
 
     this.customEmojis = []; // [{name, url}] — loaded from server
 
@@ -128,7 +132,7 @@ class HavenApp {
     this._setupSocketListeners();
     this._setupUI();
     this._setupThemes();
-    this._setupServerBar();
+    this._setupGuildBar();
     this._setupNotifications();
     this._setupPushNotifications();
     this._setupImageUpload();
@@ -154,7 +158,10 @@ class HavenApp {
     this._setupImageModePicker();
     this._setupLightbox();
     this._setupOnlineOverlay();
-    this._checkForUpdates();
+    // Update checker removed — no external calls on startup
+
+    // Check URL for invite code (?invite=CODE) before connecting
+    this._handleInviteFromUrl();
 
     // CSP-safe image error handling (no inline onerror attributes)
     // For avatar images, hide the broken img and show the letter-initial fallback
@@ -249,6 +256,19 @@ class HavenApp {
         document.getElementById('admin-mod-panel').style.display = 'block';
       } else {
         document.getElementById('admin-mod-panel').style.display = canModerate ? 'block' : 'none';
+      }
+
+      // Process pending invite code from URL (e.g. ?invite=CODE)
+      if (this._pendingInviteCode) {
+        const code = this._pendingInviteCode;
+        this._pendingInviteCode = null;
+        this.socket.emit('join-channel', { code }, (res) => {
+          if (res && res.success) {
+            this._showToast('Invite accepted! Welcome to the server.', 'success');
+          } else if (res && res.error && !res.error.includes('already')) {
+            this._showToast(res.error || 'Failed to join with invite code', 'error');
+          }
+        });
       }
     });
 
@@ -753,7 +773,7 @@ class HavenApp {
               displayContent = '[Encrypted message — unable to decrypt]';
             }
           }
-          contentEl.innerHTML = this._formatContent(displayContent);
+          contentEl._safeHTML = this._formatContent(displayContent);
           // Add or update edited indicator
           let editedTag = msgEl.querySelector('.edited-tag');
           if (!editedTag) {
@@ -778,6 +798,10 @@ class HavenApp {
           }
           msgEl.remove();
         }
+        // Close thread panel if the deleted message was the thread root
+        if (this._currentThreadId === data.messageId) {
+          this._closeThread();
+        }
       }
     });
 
@@ -791,7 +815,7 @@ class HavenApp {
           // Add pin tag to header
           const header = msgEl.querySelector('.message-header');
           if (header && !header.querySelector('.pinned-tag')) {
-            header.insertAdjacentHTML('beforeend', '<span class="pinned-tag" title="Pinned message">📌</span>');
+            safeInsertHTML(header, 'beforeend', '<span class="pinned-tag" title="Pinned message">📌</span>');
           }
           // Update toolbar: swap pin → unpin
           const pinBtn = msgEl.querySelector('[data-action="pin"]');
@@ -813,13 +837,46 @@ class HavenApp {
           const unpinBtn = msgEl.querySelector('[data-action="unpin"]');
           if (unpinBtn) { unpinBtn.dataset.action = 'pin'; unpinBtn.title = 'Pin'; }
         }
-        this._appendSystemMessage('📌 A message was unpinned');
+        this._appendSystemMessage('A message was unpinned');
       }
     });
 
     this.socket.on('pinned-messages', (data) => {
       if (data.channelCode === this.currentChannel) {
         this._renderPinnedPanel(data.pins);
+      }
+    });
+
+    // ── Thread reply events ────────────────────────────
+    this.socket.on('thread-messages', (data) => {
+      if (data.channelCode === this.currentChannel) {
+        this._renderThreadPanel(data.threadId, data.root, data.replies);
+      }
+    });
+
+    this.socket.on('new-thread-message', (data) => {
+      // Update thread count indicator on the root message in main chat
+      const rootEl = document.querySelector(`[data-msg-id="${data.threadId}"]`);
+      if (rootEl) {
+        let indicator = rootEl.querySelector('.thread-indicator');
+        if (indicator) {
+          indicator.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h2v-2h-2v2zm0-4h2V7h-2v6z"/></svg>${data.threadCount} repl${data.threadCount === 1 ? 'y' : 'ies'}`;
+        } else {
+          // Create new indicator
+          const body = rootEl.querySelector('.message-body');
+          if (body) {
+            const div = document.createElement('div');
+            div.className = 'thread-indicator';
+            div.dataset.threadId = data.threadId;
+            div.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h2v-2h-2v2zm0-4h2V7h-2v6z"/></svg>${data.threadCount} repl${data.threadCount === 1 ? 'y' : 'ies'}`;
+            body.appendChild(div);
+          }
+        }
+      }
+
+      // If thread panel is open for this thread, append the new message
+      if (this._currentThreadId === data.threadId) {
+        this._appendThreadMessage(data.message);
       }
     });
 
@@ -873,7 +930,7 @@ class HavenApp {
           if (stillExists) this._showBotDetail(this._selectedBotId);
           else {
             this._selectedBotId = null;
-            document.getElementById('bot-detail-panel').innerHTML = '<p class="muted-text" style="padding:20px;text-align:center">Select a bot to edit, or create a new one</p>';
+            document.getElementById('bot-detail-panel')._safeHTML = '<p class="muted-text" style="padding:20px;text-align:center">Select a bot to edit, or create a new one</p>';
           }
         }
       }
@@ -892,7 +949,7 @@ class HavenApp {
       const list = document.getElementById('search-results-list');
       const count = document.getElementById('search-results-count');
       count.textContent = `${data.results.length} result${data.results.length !== 1 ? 's' : ''} for "${this._escapeHtml(data.query)}"`;
-      list.innerHTML = data.results.length === 0
+      list._safeHTML = data.results.length === 0
         ? '<p class="muted-text" style="padding:12px">No results found</p>'
         : data.results.map(r => `
           <div class="search-result-item" data-msg-id="${r.id}">
@@ -1040,7 +1097,13 @@ class HavenApp {
     if (createBtn) {
       createBtn.addEventListener('click', () => {
         const name = nameInput.value.trim();
-        if (name) { this.socket.emit('create-channel', { name }); nameInput.value = ''; }
+        if (name) { 
+          this.socket.emit('create-channel', { 
+            name, 
+            guild_id: this.currentGuild ? this.currentGuild.id : null 
+          }); 
+          nameInput.value = ''; 
+        }
       });
       nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') createBtn.click(); });
     }
@@ -1067,8 +1130,8 @@ class HavenApp {
       const code = this._ctxMenuChannel;
       if (!code) return;
       this._closeChannelCtxMenu();
-      if (!confirm('⚠️ Delete this channel?\nAll messages will be permanently lost.')) return;
-      if (!confirm('⚠️ Are you ABSOLUTELY sure?\nThis action cannot be undone!')) return;
+      if (!confirm('Delete this channel?\nAll messages will be permanently lost.')) return;
+      if (!confirm('Are you ABSOLUTELY sure?\nThis action cannot be undone!')) return;
       this.socket.emit('delete-channel', { code });
     });
     // Mute channel toggle
@@ -1338,8 +1401,8 @@ class HavenApp {
     document.getElementById('webhook-copy-url-btn')?.addEventListener('click', () => {
       const urlEl = document.getElementById('webhook-url-display');
       navigator.clipboard.writeText(urlEl.value).then(() => {
-        document.getElementById('webhook-copy-url-btn').textContent = '✅ Copied';
-        setTimeout(() => { document.getElementById('webhook-copy-url-btn').textContent = '📋 Copy'; }, 2000);
+        document.getElementById('webhook-copy-url-btn').textContent = 'Copied';
+        setTimeout(() => { document.getElementById('webhook-copy-url-btn').textContent = 'Copy'; }, 2000);
       });
     });
     document.getElementById('webhook-close-btn')?.addEventListener('click', () => {
@@ -1810,6 +1873,8 @@ class HavenApp {
         this.socket.emit('pin-message', { messageId: msgId });
       } else if (action === 'unpin') {
         this.socket.emit('unpin-message', { messageId: msgId });
+      } else if (action === 'thread') {
+        this._openThread(msgId);
       }
     });
 
@@ -1826,6 +1891,30 @@ class HavenApp {
         this.socket.emit('remove-reaction', { messageId: msgId, emoji });
       } else {
         this.socket.emit('add-reaction', { messageId: msgId, emoji });
+      }
+    });
+
+    // Thread indicator click (open thread panel)
+    document.getElementById('messages').addEventListener('click', (e) => {
+      const indicator = e.target.closest('.thread-indicator');
+      if (!indicator) return;
+      const threadId = parseInt(indicator.dataset.threadId);
+      if (threadId) this._openThread(threadId);
+    });
+
+    // Thread panel: close button
+    document.getElementById('thread-close').addEventListener('click', () => {
+      this._closeThread();
+    });
+
+    // Thread panel: send reply
+    document.getElementById('thread-send-btn').addEventListener('click', () => {
+      this._sendThreadMessage();
+    });
+    document.getElementById('thread-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        this._sendThreadMessage();
       }
     });
 
@@ -2001,7 +2090,7 @@ class HavenApp {
           }
         }
 
-        hint.textContent = '✅ Password changed!';
+        hint.textContent = 'Password changed!';
         hint.classList.add('success');
         document.getElementById('current-password').value = '';
         document.getElementById('new-password').value = '';
@@ -2116,116 +2205,90 @@ class HavenApp {
   // SERVER BAR — multi-server with live status
   // ═══════════════════════════════════════════════════════
 
-  _setupServerBar() {
-    this.serverManager.startPolling(30000);
-    this._renderServerBar();
-    setInterval(() => this._renderServerBar(), 30000);
+  _setupGuildBar() {
+    // Request initial guild list
+    this.socket.emit('get-guilds');
 
-    document.getElementById('home-server').addEventListener('click', () => {
-      // Already home — pulse the icon for fun
-      const el = document.getElementById('home-server');
+    // Listen for guild updates
+    this.socket.on('guilds-list', (guilds) => {
+      this.guilds = guilds;
+      this._renderGuildBar();
+    });
+
+    this.socket.on('guild-switched', (data) => {
+      this.currentGuild = data.guild;
+      this.channels = data.channels;
+      this._renderChannels();
+      this._renderGuildBar();
+      this._showToast(`Switched to ${data.guild.name}`, 'success');
+    });
+
+    this.socket.on('guild-created', (guild) => {
+      this.guilds.push(guild);
+      this._renderGuildBar();
+      this._showToast(`Created guild: ${guild.name}`, 'success');
+    });
+
+    this.socket.on('guild-joined', (guild) => {
+      this.guilds.push(guild);
+      this._renderGuildBar();
+      this._showToast(`Joined guild: ${guild.name}`, 'success');
+    });
+
+    // Home button - show all guilds or go to default
+    document.getElementById('home-guild').addEventListener('click', () => {
+      // If we have a current guild, pulse the icon. Otherwise, this could show a guild selector
+      const el = document.getElementById('home-guild');
       el.classList.add('bounce');
       setTimeout(() => el.classList.remove('bounce'), 400);
     });
 
-    document.getElementById('add-server-btn').addEventListener('click', () => {
-      this._editingServerUrl = null;
-      document.getElementById('add-server-modal-title').textContent = 'Add a Server';
-      document.getElementById('add-server-modal').style.display = 'flex';
-      document.getElementById('add-server-name-input').value = '';
-      document.getElementById('server-url-input').value = '';
-      document.getElementById('server-url-input').disabled = false;
-      document.getElementById('add-server-icon-input').value = '';
-      document.getElementById('save-server-btn').textContent = 'Add Server';
-      document.getElementById('add-server-name-input').focus();
+    // ── "Join a Guild" button (Discord-style "+") ──────
+    document.getElementById('add-guild-btn').addEventListener('click', () => {
+      document.getElementById('add-guild-modal-title').textContent = 'Join a Guild';
+      document.getElementById('add-guild-modal').style.display = 'flex';
+      document.getElementById('guild-invite-input').value = '';
+      document.getElementById('guild-invite-input').focus();
     });
 
-    document.getElementById('cancel-server-btn').addEventListener('click', () => {
-      document.getElementById('add-server-modal').style.display = 'none';
-      document.getElementById('server-url-input').disabled = false;
-      this._editingServerUrl = null;
+    document.getElementById('cancel-guild-btn').addEventListener('click', () => {
+      document.getElementById('add-guild-modal').style.display = 'none';
     });
 
-    document.getElementById('save-server-btn').addEventListener('click', () => this._addServer());
+    // Join Guild button — handles invite codes
+    document.getElementById('join-guild-btn').addEventListener('click', () => this._joinGuildFromModal());
 
-    // Enter key in modal inputs
-    document.getElementById('server-url-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') this._addServer();
+    // Enter key in invite input
+    document.getElementById('guild-invite-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') this._joinGuildFromModal();
     });
 
-    // Close modal on overlay click
-    document.getElementById('add-server-modal').addEventListener('click', (e) => {
+    // Create Guild button (secondary action in the modal)
+    document.getElementById('create-guild-btn')?.addEventListener('click', () => {
+      document.getElementById('add-guild-modal').style.display = 'none';
+      document.getElementById('create-guild-modal').style.display = 'flex';
+      document.getElementById('create-guild-name-input').value = '';
+      document.getElementById('create-guild-name-input').focus();
+    });
+
+    // Create Guild modal handlers
+    document.getElementById('create-guild-modal-cancel-btn')?.addEventListener('click', () => {
+      document.getElementById('create-guild-modal').style.display = 'none';
+    });
+
+    document.getElementById('create-guild-modal-create-btn')?.addEventListener('click', () => this._createGuildFromModal());
+
+    document.getElementById('create-guild-name-input')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') this._createGuildFromModal();
+    });
+
+    // Close modals on overlay click
+    document.getElementById('add-guild-modal').addEventListener('click', (e) => {
       if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
     });
 
-    // ── Manage Servers gear button & modal ──────────────
-    document.getElementById('manage-servers-btn')?.addEventListener('click', () => {
-      this._openManageServersModal();
-    });
-    document.getElementById('manage-servers-close-btn')?.addEventListener('click', () => {
-      document.getElementById('manage-servers-modal').style.display = 'none';
-    });
-    document.getElementById('manage-servers-modal')?.addEventListener('click', (e) => {
+    document.getElementById('create-guild-modal')?.addEventListener('click', (e) => {
       if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
-    });
-    document.getElementById('manage-servers-add-btn')?.addEventListener('click', () => {
-      document.getElementById('manage-servers-modal').style.display = 'none';
-      document.getElementById('add-server-btn').click();
-    });
-
-    // ── Channel Code Settings Modal ─────────────────────
-    document.getElementById('channel-code-settings-btn')?.addEventListener('click', () => {
-      if (!this.currentChannel || !this.user.isAdmin) return;
-      const channel = this.channels.find(c => c.code === this.currentChannel);
-      if (!channel || channel.is_dm) return;
-
-      document.getElementById('code-settings-channel-name').textContent = `# ${channel.name}`;
-      document.getElementById('code-visibility-select').value = channel.code_visibility || 'public';
-      document.getElementById('code-mode-select').value = channel.code_mode || 'static';
-      document.getElementById('code-rotation-type-select').value = channel.code_rotation_type || 'time';
-      document.getElementById('code-rotation-interval').value = channel.code_rotation_interval || 60;
-
-      this._toggleCodeRotationFields();
-      document.getElementById('code-settings-modal').style.display = 'flex';
-    });
-
-    document.getElementById('code-mode-select')?.addEventListener('change', () => this._toggleCodeRotationFields());
-    document.getElementById('code-rotation-type-select')?.addEventListener('change', () => {
-      const type = document.getElementById('code-rotation-type-select').value;
-      const label = document.getElementById('rotation-interval-label');
-      if (label) label.textContent = type === 'time' ? 'Rotation Interval (minutes)' : 'Rotate After X Joins';
-    });
-
-    document.getElementById('code-settings-cancel-btn')?.addEventListener('click', () => {
-      document.getElementById('code-settings-modal').style.display = 'none';
-    });
-
-    document.getElementById('code-settings-modal')?.addEventListener('click', (e) => {
-      if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
-    });
-
-    document.getElementById('code-settings-save-btn')?.addEventListener('click', () => {
-      const channel = this.channels.find(c => c.code === this.currentChannel);
-      if (!channel) return;
-
-      this.socket.emit('update-channel-code-settings', {
-        channelId: channel.id,
-        code_visibility: document.getElementById('code-visibility-select').value,
-        code_mode: document.getElementById('code-mode-select').value,
-        code_rotation_type: document.getElementById('code-rotation-type-select').value,
-        code_rotation_interval: parseInt(document.getElementById('code-rotation-interval').value) || 60
-      });
-
-      document.getElementById('code-settings-modal').style.display = 'none';
-    });
-
-    document.getElementById('code-rotate-now-btn')?.addEventListener('click', () => {
-      const channel = this.channels.find(c => c.code === this.currentChannel);
-      if (!channel) return;
-
-      if (!confirm('Rotate the channel code now? Current code will become invalid.')) return;
-      this.socket.emit('rotate-channel-code', { channelId: channel.id });
-      document.getElementById('code-settings-modal').style.display = 'none';
     });
   }
 
@@ -2239,39 +2302,87 @@ class HavenApp {
     if (label) label.textContent = type === 'time' ? 'Rotation Interval (minutes)' : 'Rotate After X Joins';
   }
 
-  _addServer() {
+  // ── Join Server via invite code or link (Discord-style) ──
+  _joinServerFromModal() {
+    const raw = document.getElementById('server-url-input').value.trim();
+    if (!raw) return this._showToast('Enter an invite code or link', 'error');
+
+    // Try to extract an invite code from various formats:
+    // 1. Just a code: "a1b2c3d4"
+    // 2. Full invite link: "https://domain.com/invite/a1b2c3d4"
+    // 3. URL with query: "https://domain.com/?invite=a1b2c3d4"
+    let code = null;
+    let remoteServerUrl = null;
+
+    // Check if it's a bare 8-char hex code
+    if (/^[a-f0-9]{8}$/i.test(raw)) {
+      code = raw;
+    } else {
+      // Try to parse as URL
+      try {
+        const url = new URL(raw.startsWith('http') ? raw : 'https://' + raw);
+        // Check /invite/CODE path
+        const inviteMatch = url.pathname.match(/\/invite\/([a-f0-9]{8})$/i);
+        if (inviteMatch) {
+          code = inviteMatch[1];
+          // Check if this is a remote server (not the current page)
+          if (url.origin !== window.location.origin) {
+            remoteServerUrl = url.origin;
+          }
+        }
+        // Check ?invite=CODE query param
+        const paramCode = url.searchParams.get('invite');
+        if (!code && paramCode && /^[a-f0-9]{8}$/i.test(paramCode)) {
+          code = paramCode;
+          if (url.origin !== window.location.origin) {
+            remoteServerUrl = url.origin;
+          }
+        }
+      } catch {
+        return this._showToast('Invalid invite code or link', 'error');
+      }
+    }
+
+    if (!code) {
+      return this._showToast('Could not find a valid invite code in that input', 'error');
+    }
+
+    // If the invite is for a remote server, add it as a bookmark and open it
+    if (remoteServerUrl) {
+      const serverName = new URL(remoteServerUrl).hostname;
+      if (this.serverManager.add(serverName, remoteServerUrl)) {
+        this._renderServerBar();
+        this._showToast(`Added remote server — opening in new tab`, 'success');
+      }
+      window.open(`${remoteServerUrl}/invite/${code}`, '_blank', 'noopener');
+      document.getElementById('add-server-modal').style.display = 'none';
+      return;
+    }
+
+    // Local server invite — join via socket
+    this.socket.emit('join-channel', { code });
+    document.getElementById('add-server-modal').style.display = 'none';
+    this._showToast('Joining server...', 'success');
+  }
+
+  // ── Add external Haven server (bookmark) ──────────────
+  _addExternalServer() {
     const name = document.getElementById('add-server-name-input').value.trim();
-    const url = document.getElementById('server-url-input').value.trim();
-    const iconInput = document.getElementById('add-server-icon-input').value.trim();
+    const url = (document.getElementById('add-server-url-input') || document.getElementById('server-url-input')).value.trim();
     const autoPull = document.getElementById('server-auto-icon').checked;
     if (!name || !url) return this._showToast('Name and address are both required', 'error');
 
-    const editUrl = this._editingServerUrl;
-    if (editUrl) {
-      // Editing existing server
-      this.serverManager.update(editUrl, { name, icon: iconInput || null });
-      this._editingServerUrl = null;
+    if (this.serverManager.add(name, url, null)) {
       document.getElementById('add-server-modal').style.display = 'none';
       this._renderServerBar();
-      this._showToast(`Updated "${name}"`, 'success');
-      // Auto-pull icon if checked
-      if (autoPull) this._autoPullServerIcon(editUrl);
-    } else {
-      // Adding new server
-      const icon = iconInput || null;
-      if (this.serverManager.add(name, url, icon)) {
-        document.getElementById('add-server-modal').style.display = 'none';
-        this._renderServerBar();
-        this._showToast(`Added "${name}"`, 'success');
-        // Auto-pull icon after health check completes
-        if (autoPull) {
-          const cleanUrl = url.replace(/\/+$/, '');
-          const finalUrl = /^https?:\/\//.test(cleanUrl) ? cleanUrl : 'https://' + cleanUrl;
-          setTimeout(() => this._autoPullServerIcon(finalUrl), 2000);
-        }
-      } else {
-        this._showToast('Server already in your list', 'error');
+      this._showToast(`Added "${name}"`, 'success');
+      if (autoPull) {
+        const cleanUrl = url.replace(/\/+$/, '');
+        const finalUrl = /^https?:\/\//.test(cleanUrl) ? cleanUrl : 'https://' + cleanUrl;
+        setTimeout(() => this._autoPullServerIcon(finalUrl), 2000);
       }
+    } else {
+      this._showToast('Server already in your list', 'error');
     }
   }
 
@@ -2289,12 +2400,34 @@ class HavenApp {
     this._editingServerUrl = url;
     document.getElementById('add-server-modal-title').textContent = 'Edit Server';
     document.getElementById('add-server-name-input').value = server.name;
-    document.getElementById('server-url-input').value = server.url;
-    document.getElementById('server-url-input').disabled = true;
-    document.getElementById('add-server-icon-input').value = server.icon || '';
+    const extUrlInput = document.getElementById('add-server-url-input');
+    if (extUrlInput) extUrlInput.value = server.url;
+    document.getElementById('server-url-input').value = '';
     document.getElementById('save-server-btn').textContent = 'Save';
     document.getElementById('add-server-modal').style.display = 'flex';
     document.getElementById('add-server-name-input').focus();
+
+    // Repurpose the external server button as "Save" in edit mode
+    const extBtn = document.getElementById('add-external-server-btn');
+    if (extBtn) {
+      const origText = extBtn.textContent;
+      extBtn.textContent = 'Save Changes';
+      const handler = () => {
+        const name = document.getElementById('add-server-name-input').value.trim();
+        if (!name) return this._showToast('Name is required', 'error');
+        this.serverManager.update(url, { name });
+        this._editingServerUrl = null;
+        document.getElementById('add-server-modal').style.display = 'none';
+        this._renderServerBar();
+        this._showToast(`Updated "${name}"`, 'success');
+        extBtn.textContent = origText;
+        extBtn.removeEventListener('click', handler);
+      };
+      // Remove the default handler temporarily
+      extBtn.replaceWith(extBtn.cloneNode(true));
+      document.getElementById('add-external-server-btn').textContent = 'Save Changes';
+      document.getElementById('add-external-server-btn').addEventListener('click', handler);
+    }
   }
 
   _openManageServersModal() {
@@ -2305,7 +2438,7 @@ class HavenApp {
   _renderManageServersList() {
     const container = document.getElementById('manage-servers-list');
     const servers = this.serverManager.getAll();
-    container.innerHTML = '';
+    container.textContent =  '';
     if (servers.length === 0) return;  // CSS :empty handles empty state
 
     servers.forEach(s => {
@@ -2321,7 +2454,7 @@ class HavenApp {
         ? `<img src="${this._escapeHtml(iconUrl)}" alt="" onerror="this.style.display='none';this.parentElement.textContent='${initial}'">`
         : initial;
 
-      row.innerHTML = `
+      row._safeHTML = `
         <div class="manage-server-icon">${iconContent}</div>
         <div class="manage-server-info">
           <div class="manage-server-name">${this._escapeHtml(s.name)}</div>
@@ -2354,47 +2487,88 @@ class HavenApp {
     });
   }
 
-  _renderServerBar() {
-    const list = document.getElementById('server-list');
-    const servers = this.serverManager.getAll();
+  _renderGuildBar() {
+    const list = document.getElementById('guild-list');
+    const guilds = this.guilds || [];
 
-    list.innerHTML = servers.map(s => {
-      const initial = s.name.charAt(0).toUpperCase();
-      const online = s.status.online;
-      const statusClass = online === true ? 'online' : online === false ? 'offline' : 'unknown';
-      const statusText = online === true ? '● Online' : online === false ? '○ Offline' : '◌ Checking...';
-      // Use custom icon, auto-pulled icon from health check, or letter initial
-      const iconUrl = s.icon || (s.status.icon || null);
-      const iconContent = iconUrl
-        ? `<img src="${this._escapeHtml(iconUrl)}" class="server-icon-img" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display=''"><span class="server-icon-text" style="display:none">${initial}</span>`
-        : `<span class="server-icon-text">${initial}</span>`;
+    list._safeHTML = guilds.map(g => {
+      const initial = g.name.charAt(0).toUpperCase();
+      const isCurrent = this.currentGuild && this.currentGuild.id === g.id;
+      const iconContent = g.icon
+        ? `<img src="${this._escapeHtml(g.icon)}" class="guild-icon-img" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display=''"><span class="guild-icon-text" style="display:none">${initial}</span>`
+        : `<span class="guild-icon-text">${initial}</span>`;
       return `
-        <div class="server-icon remote" data-url="${this._escapeHtml(s.url)}"
-             title="${this._escapeHtml(s.name)} — ${statusText}">
+        <div class="guild-icon ${isCurrent ? 'active' : ''}" data-guild-id="${g.id}"
+             title="${this._escapeHtml(g.name)}">
           ${iconContent}
-          <span class="server-status-dot ${statusClass}"></span>
-          <button class="server-remove" title="Remove">&times;</button>
+          ${isCurrent ? '<span class="guild-status-dot online"></span>' : ''}
         </div>
       `;
     }).join('');
 
-    list.querySelectorAll('.server-icon.remote').forEach(el => {
-      el.addEventListener('click', (e) => {
-        if (e.target.classList.contains('server-remove')) {
-          e.stopPropagation();
-          this.serverManager.remove(el.dataset.url);
-          this._renderServerBar();
-          this._showToast('Server removed', 'success');
-          return;
-        }
-        window.open(el.dataset.url, '_blank', 'noopener');
-      });
-      // Right-click to edit
-      el.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        this._editServer(el.dataset.url);
+    list.querySelectorAll('.guild-icon').forEach(el => {
+      el.addEventListener('click', () => {
+        const guildId = el.dataset.guildId;
+        if (this.currentGuild && this.currentGuild.id === guildId) return; // Already on this guild
+        this.socket.emit('switch-guild', { guildId });
       });
     });
+  }
+
+  // ── Join Guild via invite code ──
+  _joinGuildFromModal() {
+    const inviteCode = document.getElementById('guild-invite-input').value.trim();
+    if (!inviteCode) return this._showToast('Enter an invite code', 'error');
+
+    this.socket.emit('join-guild', { inviteCode });
+    document.getElementById('add-guild-modal').style.display = 'none';
+  }
+
+  // ── Create Guild ──
+  _createGuildFromModal() {
+    const name = document.getElementById('create-guild-name-input').value.trim();
+    if (!name) return this._showToast('Enter a guild name', 'error');
+
+    this.socket.emit('create-guild', { name });
+    document.getElementById('create-guild-modal').style.display = 'none';
+  }
+
+  // ── Invite URL display (admin settings panel) ─────────
+  _updateInviteUrlDisplay() {
+    const urlEl = document.getElementById('server-invite-url');
+    if (!urlEl) return;
+    const code = this.serverSettings.server_code;
+    if (!code) {
+      urlEl.textContent = 'No invite code — click Generate to create one';
+      return;
+    }
+    // Fetch the invite URL from the server (it knows the DOMAIN config)
+    fetch('/api/server-info')
+      .then(r => r.json())
+      .then(info => {
+        if (info.inviteUrl) {
+          urlEl.textContent = info.inviteUrl;
+        } else {
+          // Fallback: construct from current page URL
+          urlEl.textContent = `${window.location.origin}/invite/${code}`;
+        }
+      })
+      .catch(() => {
+        urlEl.textContent = `${window.location.origin}/invite/${code}`;
+      });
+  }
+
+  // ── Handle ?invite=CODE from URL (redirect from /invite/:code) ──
+  _handleInviteFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const inviteCode = params.get('invite');
+    if (inviteCode && /^[a-f0-9]{8}$/i.test(inviteCode)) {
+      // Clear the query param from the URL (clean up address bar)
+      const cleanUrl = window.location.pathname;
+      window.history.replaceState({}, '', cleanUrl);
+      // Join via the server invite code after socket connects
+      this._pendingInviteCode = inviteCode;
+    }
   }
 
   // ═══════════════════════════════════════════════════════
@@ -2889,11 +3063,11 @@ class HavenApp {
     if (!bar) return;
     if (!this._imageQueue || this._imageQueue.length === 0) {
       bar.style.display = 'none';
-      bar.innerHTML = '';
+      bar.textContent =  '';
       return;
     }
     bar.style.display = 'flex';
-    bar.innerHTML = '';
+    bar.textContent =  '';
     this._imageQueue.forEach((file, idx) => {
       const thumb = document.createElement('div');
       thumb.className = 'image-queue-thumb';
@@ -2945,16 +3119,15 @@ class HavenApp {
     const preview = document.getElementById('avatar-upload-preview');
     if (!preview) return;
     if (this.user.avatar) {
-      preview.innerHTML = `<img src="${this._escapeHtml(this.user.avatar)}" alt="avatar">`;
+      preview._safeHTML = `<img src="${this._escapeHtml(this.user.avatar)}" alt="avatar">`;
     } else {
       const color = this._getUserColor(this.user.username);
       const initial = this.user.username.charAt(0).toUpperCase();
-      preview.innerHTML = `<div style="background-color:${color};width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:white">${initial}</div>`;
+      preview._safeHTML = `<div style="background-color:${color};width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:white">${initial}</div>`;
     }
   }
 
   _setupAvatarUpload() {
-    console.log('[Avatar Setup v6] Initializing with HTTP upload model...');
     if (this._avatarDelegationActive) return;
     this._avatarDelegationActive = true;
 
@@ -3007,7 +3180,7 @@ class HavenApp {
         if (preview) {
           const color = this._getUserColor(this.user.username);
           const initial = this.user.username.charAt(0).toUpperCase();
-          preview.innerHTML = `<div style="background-color:${color};width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:white">${initial}</div>`;
+          preview._safeHTML = `<div style="background-color:${color};width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:white">${initial}</div>`;
         }
         this._markAvatarUnsaved();
         return;
@@ -3037,14 +3210,13 @@ class HavenApp {
         reader.onload = (ev) => {
           this._pendingAvatarPreviewUrl = ev.target.result;
           const preview = document.getElementById('avatar-upload-preview');
-          if (preview) preview.innerHTML = `<img src="${ev.target.result}" alt="avatar preview">`;
+          if (preview) preview._safeHTML = `<img src="${ev.target.result}" alt="avatar preview">`;
           this._markAvatarUnsaved();
         };
         reader.readAsDataURL(file);
       }
     });
 
-    console.log('[Avatar Setup v6] Ready.');
   }
 
   _markAvatarUnsaved() {
@@ -3078,7 +3250,7 @@ class HavenApp {
         
         // Update preview to use the server URL
         const preview = document.getElementById('avatar-upload-preview');
-        if (preview) preview.innerHTML = `<img src="${data.url}" alt="avatar">`;
+        if (preview) preview._safeHTML = `<img src="${data.url}" alt="avatar">`;
         
         // Notify connected sockets about the avatar change (small URL, not data URL)
         if (this.socket) this.socket.emit('set-avatar', { url: data.url });
@@ -3122,13 +3294,13 @@ class HavenApp {
         if (this.socket) this.socket.emit('set-avatar-shape', { shape: this._pendingAvatarShape });
       }
 
-      if (status) { status.textContent = '✅ Saved!'; status.style.color = 'var(--success, #6f6)'; }
+      if (status) { status.textContent = 'Saved!'; status.style.color = 'var(--success, #6f6)'; }
       this._showToast('Avatar settings saved!', 'success');
       setTimeout(() => { if (status) status.textContent = ''; }, 3000);
 
     } catch (err) {
       console.error('[Avatar] Save failed:', err);
-      if (status) { status.textContent = '❌ ' + err.message; status.style.color = 'var(--danger, red)'; }
+      if (status) { status.textContent = '' + err.message; status.style.color = 'var(--danger, red)'; }
       this._showToast('Failed to save: ' + err.message, 'error');
     }
   }
@@ -3232,7 +3404,7 @@ class HavenApp {
       // Add custom sounds optgroup
       if (sounds.length > 0) {
         const customGroup = document.createElement('optgroup');
-        customGroup.label = '🎵 Custom';
+        customGroup.label = 'Custom';
         customGroup.dataset.customGroup = '1';
         sounds.forEach(s => {
           const opt = document.createElement('option');
@@ -3256,11 +3428,11 @@ class HavenApp {
     if (!list) return;
 
     if (sounds.length === 0) {
-      list.innerHTML = '<p class="muted-text">No custom sounds uploaded</p>';
+      list._safeHTML = '<p class="muted-text">No custom sounds uploaded</p>';
       return;
     }
 
-    list.innerHTML = sounds.map(s => `
+    list._safeHTML = sounds.map(s => `
       <div class="custom-sound-item">
         <span class="custom-sound-name">${this._escapeHtml(s.name)}</span>
         <button class="btn-xs sound-preview-btn" data-url="${this._escapeHtml(s.url)}" title="Preview">▶</button>
@@ -3376,11 +3548,11 @@ class HavenApp {
     if (!list) return;
 
     if (emojis.length === 0) {
-      list.innerHTML = '<p class="muted-text">No custom emojis uploaded</p>';
+      list._safeHTML = '<p class="muted-text">No custom emojis uploaded</p>';
       return;
     }
 
-    list.innerHTML = emojis.map(e => `
+    list._safeHTML = emojis.map(e => `
       <div class="custom-sound-item">
         <img src="${this._escapeHtml(e.url)}" alt=":${this._escapeHtml(e.name)}:" class="custom-emoji-preview" style="width:24px;height:24px;vertical-align:middle;margin-right:6px;">
         <span class="custom-sound-name">:${this._escapeHtml(e.name)}:</span>
@@ -3434,7 +3606,7 @@ class HavenApp {
 
   _openBotModal() {
     document.getElementById('bot-modal').style.display = 'flex';
-    document.getElementById('bot-detail-panel').innerHTML = '<p class="muted-text" style="padding:20px;text-align:center">Select a bot to edit, or create a new one</p>';
+    document.getElementById('bot-detail-panel')._safeHTML = '<p class="muted-text" style="padding:20px;text-align:center">Select a bot to edit, or create a new one</p>';
     // Request all webhooks for the sidebar
     this.socket.emit('get-webhooks');
   }
@@ -3452,7 +3624,7 @@ class HavenApp {
     const sidebar = document.getElementById('bot-list-sidebar');
     if (!sidebar) return;
     this._botWebhooks = webhooks; // cache for detail panel
-    sidebar.innerHTML = webhooks.map(wh => {
+    sidebar._safeHTML = webhooks.map(wh => {
       const avatarHtml = wh.avatar_url
         ? `<img src="${this._escapeHtml(wh.avatar_url)}" style="width:20px;height:20px;border-radius:50%;object-fit:cover;flex-shrink:0">`
         : `<span style="width:20px;height:20px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;color:#fff">🤖</span>`;
@@ -3481,7 +3653,7 @@ class HavenApp {
     const maskedToken = wh.token.slice(0, 12) + '••••••••••••';
     const channelOptions = this._getBotChannelOptions(wh.channel_id);
 
-    panel.innerHTML = `
+    panel._safeHTML = `
       <div class="role-detail-form">
         <label class="settings-label">Avatar</label>
         <div class="bot-avatar-row" style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -3489,7 +3661,7 @@ class HavenApp {
             ${wh.avatar_url ? `<img src="${this._escapeHtml(wh.avatar_url)}" style="width:100%;height:100%;object-fit:cover">` : '<span style="font-size:24px">🤖</span>'}
           </div>
           <div style="display:flex;flex-direction:column;gap:4px">
-            <button class="btn-xs btn-accent" id="bot-upload-avatar-btn">📷 Upload</button>
+            <button class="btn-xs btn-accent" id="bot-upload-avatar-btn">Upload</button>
             <button class="btn-xs" id="bot-remove-avatar-btn" ${wh.avatar_url ? '' : 'disabled'}>Remove</button>
           </div>
           <input type="file" id="bot-avatar-file-input" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none">
@@ -3517,8 +3689,8 @@ class HavenApp {
         <div style="font-size:11px;font-family:monospace;padding:4px 8px;background:var(--bg-input);border-radius:4px;color:var(--text-muted);margin-bottom:12px">${maskedToken}</div>
 
         <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn-sm btn-accent" id="bot-detail-save" style="flex:1">💾 Save Changes</button>
-          <button class="btn-sm btn-danger" id="bot-detail-delete">🗑️ Delete</button>
+          <button class="btn-sm btn-accent" id="bot-detail-save" style="flex:1">Save Changes</button>
+          <button class="btn-sm btn-danger" id="bot-detail-delete">Delete</button>
         </div>
       </div>
     `;
@@ -3731,7 +3903,7 @@ class HavenApp {
 
     const users = this._lastOnlineUsers || [];
     if (users.length === 0) {
-      list.innerHTML = '<p class="muted-text" style="padding:8px">No users</p>';
+      list._safeHTML = '<p class="muted-text" style="padding:8px">No users</p>';
       return;
     }
 
@@ -3747,7 +3919,7 @@ class HavenApp {
       html += `<div class="online-overlay-group offline">Offline — ${offline.length}</div>`;
       html += offline.map(u => this._renderOverlayUserItem(u)).join('');
     }
-    list.innerHTML = html;
+    list._safeHTML = html;
   }
 
   _renderOverlayUserItem(u) {
@@ -3967,7 +4139,7 @@ class HavenApp {
     const grid = document.getElementById('activities-grid');
     if (!modal || !grid) return;
 
-    grid.innerHTML = '';
+    grid.textContent =  '';
 
     // Check flash ROM installation status
     let flashStatus = {};
@@ -3985,8 +4157,8 @@ class HavenApp {
     if (hasFlashGames && !this._flashAllInstalled) {
       const banner = document.createElement('div');
       banner.className = 'flash-install-banner';
-      banner.innerHTML = `
-        <span>🎮 Flash games not installed (~37 MB download)</span>
+      banner._safeHTML = `
+        <span>Flash games not installed (~37 MB download)</span>
         <button class="btn-sm btn-accent" id="install-flash-btn">Download Flash Games</button>
       `;
       grid.appendChild(banner);
@@ -4028,7 +4200,7 @@ class HavenApp {
       const card = document.createElement('div');
       card.className = 'activity-card' + (!romInstalled ? ' activity-card-disabled' : '');
       card.dataset.gameId = game.id;
-      card.innerHTML = `
+      card._safeHTML = `
         <div class="activity-card-icon">${this._escapeHtml(game.icon)}</div>
         <div class="activity-card-name">${this._escapeHtml(game.name)}</div>
         <div class="activity-card-desc">${this._escapeHtml(game.description || '')}${!romInstalled ? '<br><em style=\"color:var(--text-muted)\">Not installed</em>' : ''}</div>
@@ -4131,7 +4303,7 @@ class HavenApp {
       </div>`;
     }
 
-    reasonEl.innerHTML = html;
+    reasonEl._safeHTML = html;
     modal.style.display = 'flex';
   }
 
@@ -4383,6 +4555,9 @@ class HavenApp {
     // Clear any pending image queue from previous channel
     this._clearImageQueue();
 
+    // Close thread panel when switching channels
+    this._closeThread();
+
     // Voice persists across channel switches — no auto-disconnect
 
     this.currentChannel = code;
@@ -4401,10 +4576,10 @@ class HavenApp {
     document.getElementById('channel-code-display').textContent = isDm ? '' : displayCode;
     document.getElementById('copy-code-btn').style.display = (isDm || isMaskedCode) ? 'none' : 'inline-flex';
 
-    // Show channel code settings gear for admins on non-DM channels
+    // Show channel code settings gear for admins/channel creators on non-DM channels
     const codeSettingsBtn = document.getElementById('channel-code-settings-btn');
     if (codeSettingsBtn) {
-      codeSettingsBtn.style.display = (!isDm && this.user.isAdmin) ? 'inline-flex' : 'none';
+      codeSettingsBtn.style.display = (!isDm && this._canManageChannel(channel)) ? 'inline-flex' : 'none';
     }
 
     // Show the header actions box
@@ -4429,7 +4604,7 @@ class HavenApp {
     // Show/hide topic bar
     this._updateTopicBar(channel?.topic || '');
 
-    document.getElementById('messages').innerHTML = '';
+    document.getElementById('messages').textContent =  '';
     document.getElementById('message-area').style.display = 'flex';
     document.getElementById('no-channel-msg').style.display = 'none';
 
@@ -4470,6 +4645,7 @@ class HavenApp {
   }
 
   _updateTopicBar(topic) {
+    const ch = this.channels?.find(c => c.code === this.currentChannel);
     let bar = document.getElementById('channel-topic-bar');
     if (!bar) {
       bar = document.createElement('div');
@@ -4481,11 +4657,12 @@ class HavenApp {
     if (topic) {
       bar.textContent = topic;
       bar.style.display = 'block';
-      bar.title = this.user.isAdmin ? 'Click to edit topic' : topic;
-      bar.onclick = this.user.isAdmin ? () => this._editTopic() : null;
-      bar.style.cursor = this.user.isAdmin ? 'pointer' : 'default';
+      const canEdit = this._canManageChannel(ch) || this._hasPerm('set_channel_topic');
+      bar.title = canEdit ? 'Click to edit topic' : topic;
+      bar.onclick = canEdit ? () => this._editTopic() : null;
+      bar.style.cursor = canEdit ? 'pointer' : 'default';
     } else {
-      if (this.user.isAdmin) {
+      if (this._canManageChannel(ch) || this._hasPerm('set_channel_topic')) {
         bar.textContent = 'Click to set a topic...';
         bar.style.display = 'block';
         bar.style.opacity = '0.4';
@@ -4551,14 +4728,19 @@ class HavenApp {
     // Show/hide admin-only items
     const isAdmin = this.user && this.user.isAdmin;
     const isMod = isAdmin || this._canModerate();
+    const ch = this.channels.find(c => c.code === code);
+    const canDelete = isAdmin || (ch && this._isChannelOwner(ch));
     menu.querySelectorAll('.admin-only').forEach(el => {
       el.style.display = isAdmin ? '' : 'none';
+    });
+    // Show delete button for admins or channel owners
+    menu.querySelectorAll('.owner-or-admin').forEach(el => {
+      el.style.display = canDelete ? '' : 'none';
     });
     menu.querySelectorAll('.mod-only').forEach(el => {
       el.style.display = isMod ? '' : 'none';
     });
     // Hide "Create Sub-channel" if this is already a sub-channel
-    const ch = this.channels.find(c => c.code === code);
     const createSubBtn = menu.querySelector('[data-action="create-sub-channel"]');
     if (createSubBtn && ch && ch.parent_channel_id) {
       createSubBtn.style.display = 'none';
@@ -4574,28 +4756,28 @@ class HavenApp {
     const musicBtn = menu.querySelector('[data-action="toggle-music"]');
     if (streamsBtn && ch) {
       const on = ch.streams_enabled !== 0;
-      streamsBtn.innerHTML = on
-        ? '🖥️ Streams <span class="ctx-indicator ctx-on">✅ ON</span>'
-        : '🖥️ Streams <span class="ctx-indicator ctx-off">❌ OFF</span>';
+      streamsBtn._safeHTML = on
+        ? 'Streams <span class="ctx-indicator ctx-on">ON</span>'
+        : 'Streams <span class="ctx-indicator ctx-off">OFF</span>';
     }
     if (musicBtn && ch) {
       const on = ch.music_enabled !== 0;
-      musicBtn.innerHTML = on
-        ? '🎵 Music <span class="ctx-indicator ctx-on">✅ ON</span>'
-        : '🎵 Music <span class="ctx-indicator ctx-off">❌ OFF</span>';
+      musicBtn._safeHTML = on
+        ? 'Music <span class="ctx-indicator ctx-on">ON</span>'
+        : 'Music <span class="ctx-indicator ctx-off">OFF</span>';
     }
     // Update slow mode indicator
     const slowBtn = menu.querySelector('[data-action="slow-mode"]');
     if (slowBtn && ch) {
       const interval = ch.slow_mode_interval || 0;
-      slowBtn.innerHTML = interval > 0
-        ? `🐢 Slow Mode <span class="ctx-indicator ctx-on">${interval}s</span>`
-        : '🐢 Slow Mode <span class="ctx-indicator ctx-off">OFF</span>';
+      slowBtn._safeHTML = interval > 0
+        ? `Slow Mode <span class="ctx-indicator ctx-on">${interval}s</span>`
+        : 'Slow Mode <span class="ctx-indicator ctx-off">OFF</span>';
     }
     // Update mute label
     const muted = JSON.parse(localStorage.getItem('haven_muted_channels') || '[]');
     const muteBtn = menu.querySelector('[data-action="mute"]');
-    if (muteBtn) muteBtn.textContent = muted.includes(code) ? '🔕 Unmute Channel' : '🔔 Mute Channel';
+    if (muteBtn) muteBtn.textContent = muted.includes(code) ? 'Unmute Channel' : 'Mute Channel';
     // Show/hide voice options based on current voice state
     const joinVoiceBtn = menu.querySelector('[data-action="join-voice"]');
     const leaveVoiceBtn = menu.querySelector('[data-action="leave-voice"]');
@@ -4643,7 +4825,7 @@ class HavenApp {
       const code = this._dmCtxMenuCode;
       if (!code) return;
       this._closeDmCtxMenu();
-      if (!confirm('⚠️ Delete this DM?\nAll messages will be permanently deleted for both users.')) return;
+      if (!confirm('Delete this DM?\nAll messages will be permanently deleted for both users.')) return;
       this.socket.emit('delete-dm', { code });
     });
 
@@ -4663,7 +4845,7 @@ class HavenApp {
     // Update mute label
     const muted = JSON.parse(localStorage.getItem('haven_muted_channels') || '[]');
     const muteBtn = menu.querySelector('[data-action="dm-mute"]');
-    if (muteBtn) muteBtn.textContent = muted.includes(code) ? '🔕 Unmute DM' : '🔔 Mute DM';
+    if (muteBtn) muteBtn.textContent = muted.includes(code) ? 'Unmute DM' : 'Mute DM';
 
     // Position
     if (mouseEvent) {
@@ -4705,7 +4887,7 @@ class HavenApp {
       this._organizeCatOrder = JSON.parse(localStorage.getItem('haven_cat_order___server__') || '[]');
       this._organizeCatSort = localStorage.getItem('haven_cat_sort___server__') || 'az';
 
-      document.getElementById('organize-modal-title').textContent = '📋 Organize Channels';
+      document.getElementById('organize-modal-title').textContent = 'Organize Channels';
       document.getElementById('organize-modal-parent-name').textContent = 'Reorder channels and assign category tags';
       // Server-level sort is stored in localStorage (no single parent channel to hold it)
       const sortSel = document.getElementById('organize-global-sort');
@@ -4734,7 +4916,7 @@ class HavenApp {
     this._organizeCatOrder = JSON.parse(localStorage.getItem(`haven_cat_order_${parentCode}`) || '[]');
     this._organizeCatSort = localStorage.getItem(`haven_cat_sort_${parentCode}`) || 'az';
 
-    document.getElementById('organize-modal-title').textContent = '📋 Organize Sub-channels';
+    document.getElementById('organize-modal-title').textContent = 'Organize Sub-channels';
     document.getElementById('organize-modal-parent-name').textContent = `# ${parent.name}`;
     // Map sort_alphabetical: 0=manual, 1=alpha, 2=created
     const sortSel = document.getElementById('organize-global-sort');
@@ -4860,7 +5042,7 @@ class HavenApp {
       html = '<div style="padding:24px;text-align:center;opacity:0.4;font-size:0.9rem">' + (this._organizeServerLevel ? 'No channels yet' : 'No sub-channels yet') + '</div>';
     }
 
-    listEl.innerHTML = html;
+    listEl._safeHTML = html;
 
     // Click to select channel
     listEl.querySelectorAll('.organize-item').forEach(el => {
@@ -5097,7 +5279,7 @@ class HavenApp {
         </div>`;
       }
     }
-    listEl.innerHTML = html || '<p class="muted-text">No DMs to organize</p>';
+    listEl._safeHTML = html || '<p class="muted-text">No DMs to organize</p>';
 
     // Click to select
     listEl.querySelectorAll('.organize-item').forEach(el => {
@@ -5130,7 +5312,7 @@ class HavenApp {
     document.getElementById('webhook-modal-channel-name').textContent = ch ? `# ${ch.name}` : '';
     document.getElementById('webhook-name-input').value = '';
     document.getElementById('webhook-token-reveal').style.display = 'none';
-    document.getElementById('webhook-list').innerHTML = '<p style="opacity:0.5;font-size:0.85rem">Loading…</p>';
+    document.getElementById('webhook-list')._safeHTML = '<p style="opacity:0.5;font-size:0.85rem">Loading…</p>';
     modal.style.display = 'flex';
     this.socket.emit('get-webhooks', { channelCode });
   }
@@ -5138,10 +5320,10 @@ class HavenApp {
   _renderWebhookList(webhooks, channelCode) {
     const container = document.getElementById('webhook-list');
     if (!webhooks.length) {
-      container.innerHTML = '<p style="opacity:0.5;font-size:0.85rem">No webhooks yet. Create one above.</p>';
+      container._safeHTML = '<p style="opacity:0.5;font-size:0.85rem">No webhooks yet. Create one above.</p>';
       return;
     }
-    container.innerHTML = webhooks.map(wh => {
+    container._safeHTML = webhooks.map(wh => {
       const maskedToken = wh.token.slice(0, 8) + '••••••••';
       const statusLabel = wh.is_active ? '🟢 Active' : '🔴 Disabled';
       const toggleLabel = wh.is_active ? 'Disable' : 'Enable';
@@ -5173,10 +5355,12 @@ class HavenApp {
 
   _renderChannels() {
     const list = document.getElementById('channel-list');
-    list.innerHTML = '';
+    list.textContent =  '';
 
-    const regularChannels = this.channels.filter(c => !c.is_dm);
-    const dmChannels = this.channels.filter(c => c.is_dm);
+    // Filter channels by current guild
+    const guildChannels = this.channels.filter(c => !this.currentGuild || c.guild_id === this.currentGuild.id);
+    const regularChannels = guildChannels.filter(c => !c.is_dm);
+    const dmChannels = guildChannels.filter(c => c.is_dm);
 
     // Build parent → sub-channel tree
     const parentChannels = regularChannels.filter(c => !c.parent_channel_id);
@@ -5320,7 +5504,7 @@ class HavenApp {
         if (badges.length) indicators = `<span class="channel-indicators" style="margin-left:auto;display:flex;gap:2px;flex-shrink:0">${badges.join('')}</span>`;
       }
 
-      el.innerHTML = `
+      el._safeHTML = `
         ${hasSubs ? `<span class="channel-collapse-arrow${isCollapsed ? ' collapsed' : ''}" title="Expand/collapse sub-channels">▾</span>` : ''}
         <span class="channel-hash">${hashIcon}</span>
         <span class="channel-name">${this._escapeHtml(ch.name)}</span>
@@ -5464,7 +5648,7 @@ class HavenApp {
     // ── DM section (separate pane) ──
     const dmList = document.getElementById('dm-list');
     if (dmList) {
-      dmList.innerHTML = '';
+      dmList.textContent =  '';
       const dmCollapsed = localStorage.getItem('haven_dm_collapsed') === 'true';
       const dmArrow = document.getElementById('dm-toggle-arrow');
 
@@ -5535,7 +5719,7 @@ class HavenApp {
         el.className = 'channel-item dm-item' + (ch.code === this.currentChannel ? ' active' : '');
         el.dataset.code = ch.code;
         const dmName = getDmName(ch);
-        el.innerHTML = `
+        el._safeHTML = `
           <span class="channel-hash">@</span>
           <span class="channel-name">${this._escapeHtml(dmName)}</span>
         `;
@@ -5578,7 +5762,7 @@ class HavenApp {
           // Category header
           const header = document.createElement('div');
           header.className = 'dm-category-header';
-          header.innerHTML = `<span class="dm-category-arrow${isCollapsed ? ' collapsed' : ''}">▾</span> <span class="dm-category-name">${this._escapeHtml(tag)}</span>`;
+          header._safeHTML = `<span class="dm-category-arrow${isCollapsed ? ' collapsed' : ''}">▾</span> <span class="dm-category-name">${this._escapeHtml(tag)}</span>`;
           header.style.cursor = 'pointer';
           header.addEventListener('click', () => {
             const cats = JSON.parse(localStorage.getItem('haven_dm_categories') || '{}');
@@ -5605,7 +5789,7 @@ class HavenApp {
           header.className = 'dm-category-header';
           header.style.opacity = '0.5';
           header.style.cursor = 'pointer';
-          header.innerHTML = `<span class="dm-category-arrow${uncatCollapsed ? ' collapsed' : ''}">▾</span> <span class="dm-category-name">Uncategorized</span>`;
+          header._safeHTML = `<span class="dm-category-arrow${uncatCollapsed ? ' collapsed' : ''}">▾</span> <span class="dm-category-name">Uncategorized</span>`;
           header.addEventListener('click', () => {
             const cats = JSON.parse(localStorage.getItem('haven_dm_categories') || '{}');
             if (!cats['__uncategorized__']) cats['__uncategorized__'] = {};
@@ -5676,7 +5860,7 @@ class HavenApp {
           if (moreBtn) el.insertBefore(indicator, moreBtn);
           else el.appendChild(indicator);
         }
-        indicator.innerHTML = `<span class="voice-icon">🔊</span>${count}`;
+        indicator._safeHTML = `<span class="voice-icon">🔊</span>${count}`;
       } else if (indicator) {
         indicator.remove();
       }
@@ -5699,7 +5883,7 @@ class HavenApp {
         const cmd = parts[1].toLowerCase();
         const arg = (parts[2] || '').trim();
         if (cmd === 'clear') {
-          document.getElementById('messages').innerHTML = '';
+          document.getElementById('messages').textContent =  '';
           input.value = '';
           input.style.height = 'auto';
           this._hideMentionDropdown();
@@ -5798,7 +5982,7 @@ class HavenApp {
 
   _renderMessages(messages) {
     const container = document.getElementById('messages');
-    container.innerHTML = '';
+    container.textContent =  '';
     messages.forEach((msg, i) => {
       const prevMsg = i > 0 ? messages[i - 1] : null;
       container.appendChild(this._createMessageEl(msg, prevMsg));
@@ -5893,9 +6077,12 @@ class HavenApp {
     const editedHtml = msg.edited_at ? `<span class="edited-tag" title="Edited at ${new Date(msg.edited_at).toLocaleString()}">(edited)</span>` : '';
     const pinnedTag = msg.pinned ? '<span class="pinned-tag" title="Pinned message">📌</span>' : '';
     const e2eTag = msg._e2e ? '<span class="e2e-tag" title="End-to-end encrypted">🔒</span>' : '';
+    const threadHtml = msg.thread_count > 0
+      ? `<div class="thread-indicator" data-thread-id="${msg.id}"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h2v-2h-2v2zm0-4h2V7h-2v6z"/></svg>${msg.thread_count} repl${msg.thread_count === 1 ? 'y' : 'ies'}</div>`
+      : '';
 
     // Build toolbar with context-aware buttons
-    let toolbarBtns = `<button data-action="react" title="React">😀</button><button data-action="reply" title="Reply">↩️</button>`;
+    let toolbarBtns = `<button data-action="react" title="React">😀</button><button data-action="reply" title="Reply">↩️</button><button data-action="thread" title="Thread">🧵</button>`;
     const canPin = this.user.isAdmin || this._canModerate();
     const canDelete = msg.user_id === this.user.id || this.user.isAdmin || this._canModerate();
     if (canPin) {
@@ -5921,11 +6108,12 @@ class HavenApp {
       el.dataset.msgId = msg.id;
       if (msg.pinned) el.dataset.pinned = '1';
       if (msg._e2e) el.dataset.e2e = '1';
-      el.innerHTML = `
+      el._safeHTML = `
         <span class="compact-time">${new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>
         <div class="message-body">
           <div class="message-content">${pinnedTag}${this._formatContent(msg.content)}${editedHtml}</div>
           ${reactionsHtml}
+          ${threadHtml}
         </div>
         ${e2eTag}
         ${toolbarHtml}
@@ -5972,7 +6160,7 @@ class HavenApp {
     el.dataset.msgId = msg.id;
     if (msg.pinned) el.dataset.pinned = '1';
     if (msg._e2e) el.dataset.e2e = '1';
-    el.innerHTML = `
+    el._safeHTML = `
       ${replyHtml}
       <div class="message-row">
         ${avatarHtml}
@@ -5988,6 +6176,7 @@ class HavenApp {
           </div>
           <div class="message-content">${this._formatContent(msg.content)}${editedHtml}</div>
           ${reactionsHtml}
+          ${threadHtml}
         </div>
         ${toolbarHtml}
       </div>
@@ -6036,7 +6225,7 @@ class HavenApp {
     compactEl.dataset.time = time;
     compactEl.dataset.msgId = msgId;
     if (isPinned) compactEl.dataset.pinned = '1';
-    compactEl.innerHTML = `
+    compactEl._safeHTML = `
       <div class="message-row">
         ${avatarHtml}
         <div class="message-body">
@@ -6076,9 +6265,9 @@ class HavenApp {
     count.textContent = `📌 ${pins.length} pinned message${pins.length !== 1 ? 's' : ''}`;
 
     if (pins.length === 0) {
-      list.innerHTML = '<p class="muted-text" style="padding:12px">No pinned messages</p>';
+      list._safeHTML = '<p class="muted-text" style="padding:12px">No pinned messages</p>';
     } else {
-      list.innerHTML = pins.map(p => `
+      list._safeHTML = pins.map(p => `
         <div class="pinned-item" data-msg-id="${p.id}">
           <div class="pinned-item-header">
             <span class="pinned-item-author" style="color:${this._getUserColor(p.username)}">${this._escapeHtml(p.username)}</span>
@@ -6106,6 +6295,110 @@ class HavenApp {
     });
   }
 
+  // ── Thread Panel ──────────────────────────────────────
+
+  _openThread(threadId) {
+    this._currentThreadId = threadId;
+    this.socket.emit('get-thread-messages', { threadId });
+  }
+
+  _closeThread() {
+    this._currentThreadId = null;
+    document.getElementById('thread-panel').style.display = 'none';
+  }
+
+  _renderThreadPanel(threadId, root, replies) {
+    this._currentThreadId = threadId;
+    const panel = document.getElementById('thread-panel');
+    const rootEl = document.getElementById('thread-root');
+    const repliesEl = document.getElementById('thread-replies');
+    const countEl = document.getElementById('thread-reply-count');
+    const input = document.getElementById('thread-input');
+
+    // Render root message
+    rootEl._safeHTML = this._renderThreadMsg(root);
+
+    // Render reply count
+    countEl.textContent = `${replies.length} repl${replies.length === 1 ? 'y' : 'ies'}`;
+
+    // Render replies
+    if (replies.length === 0) {
+      repliesEl._safeHTML = '<p class="muted-text" style="padding:12px;text-align:center;font-size:13px">No replies yet. Start the conversation!</p>';
+    } else {
+      repliesEl._safeHTML = replies.map(r => this._renderThreadMsg(r)).join('');
+    }
+
+    panel.style.display = 'flex';
+    input.focus();
+
+    // Scroll replies to bottom
+    requestAnimationFrame(() => {
+      repliesEl.scrollTop = repliesEl.scrollHeight;
+    });
+  }
+
+  _renderThreadMsg(msg) {
+    const color = this._getUserColor(msg.username);
+    const initial = msg.username.charAt(0).toUpperCase();
+    const editedHtml = msg.edited_at ? '<span class="edited-tag">(edited)</span>' : '';
+    const avatarHtml = msg.avatar
+      ? `<img src="${this._escapeHtml(msg.avatar)}" alt="${initial}" style="width:28px;height:28px;border-radius:50%;object-fit:cover">`
+      : initial;
+
+    return `
+      <div class="thread-msg" data-msg-id="${msg.id}">
+        <div class="thread-msg-avatar" style="background-color:${color}">${avatarHtml}</div>
+        <div class="thread-msg-body">
+          <div class="thread-msg-header">
+            <span class="thread-msg-author" style="color:${color}">${this._escapeHtml(msg.username)}</span>
+            <span class="thread-msg-time">${this._formatTime(msg.created_at)}</span>
+          </div>
+          <div class="thread-msg-content">${this._formatContent(msg.content)}${editedHtml}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  _appendThreadMessage(msg) {
+    const repliesEl = document.getElementById('thread-replies');
+    const countEl = document.getElementById('thread-reply-count');
+
+    // Remove "no replies" placeholder
+    const placeholder = repliesEl.querySelector('.muted-text');
+    if (placeholder) placeholder.remove();
+
+    // Append the new message
+    const wasAtBottom = repliesEl.scrollHeight - repliesEl.scrollTop - repliesEl.clientHeight < 50;
+    const div = document.createElement('div');
+    div.innerHTML = this._renderThreadMsg(msg);
+    const msgEl = div.firstElementChild;
+    repliesEl.appendChild(msgEl);
+
+    // Update count
+    const count = repliesEl.querySelectorAll('.thread-msg').length;
+    countEl.textContent = `${count} repl${count === 1 ? 'y' : 'ies'}`;
+
+    if (wasAtBottom) {
+      requestAnimationFrame(() => {
+        repliesEl.scrollTop = repliesEl.scrollHeight;
+      });
+    }
+  }
+
+  _sendThreadMessage() {
+    const input = document.getElementById('thread-input');
+    const content = input.value.trim();
+    if (!content || !this._currentThreadId) return;
+
+    this.socket.emit('send-thread-message', {
+      threadId: this._currentThreadId,
+      content
+    });
+
+    input.value = '';
+    input.focus();
+  }
+
   // ── Link Previews ─────────────────────────────────────
 
   _fetchLinkPreviews(containerEl) {
@@ -6129,7 +6422,7 @@ class HavenApp {
         const wrapper = document.createElement('div');
         wrapper.className = 'link-preview-yt';
         wrapper.dataset.url = url;
-        wrapper.innerHTML = `<iframe src="https://www.youtube.com/embed/${this._escapeHtml(ytVideoId)}?rel=0" width="100%" height="270" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;
+        wrapper._safeHTML = `<iframe src="https://www.youtube.com/embed/${this._escapeHtml(ytVideoId)}?rel=0" width="100%" height="270" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;
         msgContent.appendChild(wrapper);
         if (this._isScrolledToBottom()) this._scrollToBottom();
         return; // skip generic link preview for YouTube
@@ -6163,7 +6456,7 @@ class HavenApp {
           if (data.title) inner += `<span class="link-preview-title">${this._escapeHtml(data.title)}</span>`;
           if (data.description) inner += `<span class="link-preview-desc">${this._escapeHtml(data.description).slice(0, 200)}</span>`;
           inner += '</div>';
-          card.innerHTML = inner;
+          card._safeHTML = inner;
 
           msgContent.appendChild(card);
 
@@ -6207,7 +6500,7 @@ class HavenApp {
     this._lastOnlineUsers = users;
     const el = document.getElementById('online-users');
     if (users.length === 0) {
-      el.innerHTML = '<p class="muted-text">No one here</p>';
+      el._safeHTML = '<p class="muted-text">No one here</p>';
       return;
     }
 
@@ -6248,7 +6541,7 @@ class HavenApp {
       html = '<p class="muted-text">No one here</p>';
     }
 
-    el.innerHTML = html;
+    el._safeHTML = html;
 
     // Bind gear button → dropdown menu with mod actions
     if (this.user.isAdmin || this._canModerate() || this._hasPerm('promote_user')) {
@@ -6288,15 +6581,15 @@ class HavenApp {
     const isAdmin = this.user.isAdmin;
 
     let items = '';
-    if (canPromote) items += `<button class="gear-menu-item" data-action="assign-role">👑 Assign Role</button>`;
-    if (canMod) items += `<button class="gear-menu-item" data-action="kick">👢 Kick</button>`;
-    if (canMod) items += `<button class="gear-menu-item" data-action="mute">🔇 Mute</button>`;
-    if (isAdmin) items += `<button class="gear-menu-item gear-menu-danger" data-action="ban">⛔ Ban</button>`;
-    if (isAdmin) items += `<div class="gear-menu-divider"></div><button class="gear-menu-item gear-menu-danger" data-action="transfer-admin">🔑 Transfer Admin</button>`;
+    if (canPromote) items += `<button class="gear-menu-item" data-action="assign-role">Assign Role</button>`;
+    if (canMod) items += `<button class="gear-menu-item" data-action="kick">Kick</button>`;
+    if (canMod) items += `<button class="gear-menu-item" data-action="mute">Mute</button>`;
+    if (isAdmin) items += `<button class="gear-menu-item gear-menu-danger" data-action="ban">Ban</button>`;
+    if (isAdmin) items += `<div class="gear-menu-divider"></div><button class="gear-menu-item gear-menu-danger" data-action="transfer-admin">Transfer Admin</button>`;
 
     const menu = document.createElement('div');
     menu.className = 'user-gear-menu';
-    menu.innerHTML = items;
+    menu._safeHTML = items;
     document.body.appendChild(menu);
 
     // Position near the gear button
@@ -6464,13 +6757,13 @@ class HavenApp {
 
     // Action buttons
     const actionsHtml = isSelf
-      ? `<button class="profile-popup-action-btn profile-edit-btn" id="profile-popup-edit-btn">✏️ Edit Profile</button>`
-      : `<button class="profile-popup-action-btn profile-dm-btn" data-dm-uid="${profile.id}">💬 Message</button>`;
+      ? `<button class="profile-popup-action-btn profile-edit-btn" id="profile-popup-edit-btn">Edit Profile</button>`
+      : `<button class="profile-popup-action-btn profile-dm-btn" data-dm-uid="${profile.id}">Message</button>`;
 
     const popup = document.createElement('div');
     popup.id = 'profile-popup';
     popup.className = 'profile-popup';
-    popup.innerHTML = `
+    popup._safeHTML = `
       <div class="profile-popup-banner" style="background:linear-gradient(135deg, ${color}44, ${color}22)">
         <button class="profile-popup-close" title="Close">&times;</button>
       </div>
@@ -6610,7 +6903,7 @@ class HavenApp {
     modal.id = 'edit-profile-modal';
     modal.className = 'modal-overlay';
     modal.style.display = 'flex';
-    modal.innerHTML = `
+    modal._safeHTML = `
       <div class="modal edit-profile-modal-box">
         <h3>Edit Profile</h3>
         <label class="edit-profile-label">Bio <span class="muted-text">(max 190 chars)</span></label>
@@ -6647,11 +6940,11 @@ class HavenApp {
     this._lastVoiceUsers = users; // Cache for re-render on stream info updates
     const el = document.getElementById('voice-users');
     if (users.length === 0) {
-      el.innerHTML = '<p class="muted-text">No one in voice</p>';
+      el._safeHTML = '<p class="muted-text">No one in voice</p>';
       return;
     }
     const streams = this._streamInfo || [];
-    el.innerHTML = users.map(u => {
+    el._safeHTML = users.map(u => {
       const isSelf = u.id === this.user.id;
       const talking = this.voice && ((isSelf && this.voice.talkingState.get('self')) || this.voice.talkingState.get(u.id));
       const dotColor = u.roleColor || '';
@@ -6719,17 +7012,17 @@ class HavenApp {
     const canKick = this._hasPerm('kick_user');
     const menu = document.createElement('div');
     menu.className = 'voice-user-menu';
-    menu.innerHTML = `
+    menu._safeHTML = `
       <div class="voice-user-menu-header">${this._escapeHtml(username)}</div>
       <div class="voice-user-menu-row">
-        <span class="voice-user-menu-label">🔊 Volume</span>
+        <span class="voice-user-menu-label">Volume</span>
         <input type="range" class="volume-slider voice-user-vol-slider" min="0" max="200" value="${savedVol}" title="Volume: ${savedVol}%">
         <span class="voice-user-vol-value">${savedVol}%</span>
       </div>
       <div class="voice-user-menu-actions">
-        <button class="voice-user-menu-action" data-action="mute-user">${isMuted ? '🔊 Unmute' : '🔇 Mute'}</button>
-        <button class="voice-user-menu-action ${isDeafened ? 'active' : ''}" data-action="deafen-user">${isDeafened ? '🔊 Undeafen' : '🔇 Deafen'}</button>
-        ${canKick ? `<button class="voice-user-menu-action danger" data-action="voice-kick" title="Remove from voice channel">🚪 Voice Kick</button>` : ''}
+        <button class="voice-user-menu-action" data-action="mute-user">${isMuted ? 'Unmute' : 'Mute'}</button>
+        <button class="voice-user-menu-action ${isDeafened ? 'active' : ''}" data-action="deafen-user">${isDeafened ? 'Undeafen' : 'Deafen'}</button>
+        ${canKick ? `<button class="voice-user-menu-action danger" data-action="voice-kick" title="Remove from voice channel">Voice Kick</button>` : ''}
       </div>
       <div class="voice-user-menu-hint">
         <small>Mute = you can't hear them</small><br>
@@ -6771,18 +7064,18 @@ class HavenApp {
           volLabel.textContent = `${newVol}%`;
           this._setVoiceVolume(userId, newVol);
           if (this.voice) this.voice.setVolume(userId, newVol / 100);
-          btn.textContent = newVol === 0 ? '🔊 Unmute' : '🔇 Mute';
+          btn.textContent = newVol === 0 ? 'Unmute' : 'Mute';
         } else if (btn.dataset.action === 'deafen-user') {
           // Deafen: stop sending YOUR audio to THEM (they can't hear you)
           if (this.voice) {
             if (this.voice.isUserDeafened(userId)) {
               this.voice.undeafenUser(userId);
-              btn.textContent = '🔇 Deafen';
+              btn.textContent = 'Deafen';
               btn.classList.remove('active');
               this._showToast(`${this._escapeHtml(username)} can hear you again`, 'info');
             } else {
               this.voice.deafenUser(userId);
-              btn.textContent = '🔊 Undeafen';
+              btn.textContent = 'Undeafen';
               btn.classList.add('active');
               this._showToast(`${this._escapeHtml(username)} can no longer hear you`, 'info');
             }
@@ -6938,7 +7231,7 @@ class HavenApp {
       // Clear all stream tiles so no ghost tiles persist after leaving voice
       const grid = document.getElementById('screen-share-grid');
       grid.querySelectorAll('video').forEach(v => { v.srcObject = null; });
-      grid.innerHTML = '';
+      grid.textContent =  '';
       document.getElementById('screen-share-container').style.display = 'none';
       this._screenShareMinimized = false;
       this._removeScreenShareIndicator();
@@ -6962,11 +7255,11 @@ class HavenApp {
     if (this.voice && this.voice.inVoice && this.voice.currentChannel) {
       const ch = this.channels.find(c => c.code === this.voice.currentChannel);
       const name = ch ? (ch.is_dm && ch.dm_target ? `@ ${ch.dm_target.username}` : `# ${ch.name}`) : this.voice.currentChannel;
-      bar.innerHTML = `<span class="voice-bar-icon">🔊</span><span class="voice-bar-channel">${name}</span><button class="voice-bar-leave" id="voice-bar-leave-btn" title="Disconnect">✕</button>`;
+      bar._safeHTML = `<span class="voice-bar-icon">🔊</span><span class="voice-bar-channel">${name}</span><button class="voice-bar-leave" id="voice-bar-leave-btn" title="Disconnect">✕</button>`;
       bar.style.display = 'flex';
       document.getElementById('voice-bar-leave-btn').addEventListener('click', () => this._leaveVoice());
     } else {
-      bar.innerHTML = '';
+      bar.textContent =  '';
       bar.style.display = 'none';
     }
   }
@@ -7364,7 +7657,7 @@ class HavenApp {
       document.querySelector('.voice-controls')?.appendChild(bar);
     }
 
-    bar.innerHTML = `<button class="hidden-stream-restore-btn" title="Show hidden streams">🖥 ${hiddenTiles.length} stream${hiddenTiles.length > 1 ? 's' : ''} hidden</button>`;
+    bar._safeHTML = `<button class="hidden-stream-restore-btn" title="Show hidden streams">🖥 ${hiddenTiles.length} stream${hiddenTiles.length > 1 ? 's' : ''} hidden</button>`;
 
     // Bind restore button — clicking it restores all hidden streams
     bar.querySelector('.hidden-stream-restore-btn').addEventListener('click', () => {
@@ -7449,7 +7742,7 @@ class HavenApp {
       if (!tile.querySelector('.stream-audio-badge')) {
         const badge = document.createElement('div');
         badge.className = 'stream-audio-badge';
-        badge.innerHTML = '🔊 Audio';
+        badge._safeHTML = 'Audio';
         tile.appendChild(badge);
       }
       // Restore audio controls visibility since audio is available
@@ -7489,7 +7782,7 @@ class HavenApp {
     // Add the no-audio badge
     const badge = document.createElement('div');
     badge.className = 'stream-no-audio-badge';
-    badge.innerHTML = '🔇 No Audio';
+    badge._safeHTML = 'No Audio';
     tile.appendChild(badge);
     // Hide audio controls since there's no audio to control
     const controls = document.getElementById(`stream-controls-${userId || 'self'}`);
@@ -7518,7 +7811,7 @@ class HavenApp {
       badge.className = 'stream-viewer-badge';
       const names = viewers.map(v => v.username).join(', ');
       const eyeCount = viewers.length;
-      badge.innerHTML = `<span class="viewer-eye">👁</span> ${eyeCount}`;
+      badge._safeHTML = `<span class="viewer-eye">👁</span> ${eyeCount}`;
       badge.title = `Watching: ${names}`;
       tile.appendChild(badge);
     });
@@ -7619,7 +7912,7 @@ class HavenApp {
     pip.style.width = '480px';
     pip.style.minHeight = '320px';
 
-    pip.innerHTML = `
+    pip._safeHTML = `
       <div class="music-pip-embed stream-pip-video"></div>
       <div class="music-pip-controls">
         <button class="music-pip-btn stream-pip-popin" title="Pop back in">⧈</button>
@@ -7699,7 +7992,7 @@ class HavenApp {
       return;
     }
     document.getElementById('music-link-input').value = '';
-    document.getElementById('music-link-preview').innerHTML = '';
+    document.getElementById('music-link-preview').textContent =  '';
     document.getElementById('music-link-preview').classList.remove('active');
     document.getElementById('music-modal').style.display = 'flex';
     setTimeout(() => document.getElementById('music-link-input').focus(), 100);
@@ -7711,15 +8004,15 @@ class HavenApp {
 
   _previewMusicLink(url) {
     const preview = document.getElementById('music-link-preview');
-    if (!url) { preview.innerHTML = ''; preview.classList.remove('active'); return; }
+    if (!url) { preview.textContent =  ''; preview.classList.remove('active'); return; }
     const platform = this._getMusicPlatform(url);
     const embedUrl = this._getMusicEmbed(url);
     if (platform && embedUrl) {
       preview.classList.add('active');
-      preview.innerHTML = `${platform.icon} <strong>${platform.name}</strong> — Ready to share`;
+      preview._safeHTML = `${platform.icon} <strong>${platform.name}</strong> — Ready to share`;
     } else {
       preview.classList.remove('active');
-      preview.innerHTML = '';
+      preview.textContent =  '';
     }
   }
 
@@ -7755,9 +8048,9 @@ class HavenApp {
     const picker = document.createElement('div');
     picker.id = 'music-search-picker';
     picker.className = 'music-search-picker';
-    picker.innerHTML = `
+    picker._safeHTML = `
       <div class="music-search-picker-header">
-        <span>🔍 Results for "<strong>${this._escapeHtml(query)}</strong>"</span>
+        <span>Results for "<strong>${this._escapeHtml(query)}</strong>"</span>
         <button class="music-search-picker-close" title="Cancel">✕</button>
       </div>
       <div class="music-search-picker-list">
@@ -7852,9 +8145,9 @@ class HavenApp {
     // We skip referrerpolicy=no-referrer so the IFrame API (enablejsapi) can
     // communicate with the parent window; the origin= param already handles
     // the "Video unavailable" issue that self-hosted instances used to trigger.
-    container.innerHTML = `<div class="music-embed-wrapper"><iframe id="music-iframe" src="${embedUrl}" width="100%" height="${iframeH}" frameborder="0" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy"></iframe>${needsOverlay ? '<div class="music-embed-overlay"></div>' : ''}</div>`;
+    container._safeHTML = `<div class="music-embed-wrapper"><iframe id="music-iframe" src="${embedUrl}" width="100%" height="${iframeH}" frameborder="0" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy"></iframe>${needsOverlay ? '<div class="music-embed-overlay"></div>' : ''}</div>`;
     if (data.resolvedFrom === 'spotify') {
-      label.textContent = `🎵 🟢 Spotify (via YouTube) — shared by ${data.username || 'someone'}`;
+      label.textContent = `🎵 Spotify (via YouTube) — shared by ${data.username || 'someone'}`;
     } else {
       label.textContent = `🎵 ${platform ? platform.name : 'Music'} — shared by ${data.username || 'someone'}`;
     }
@@ -8175,7 +8468,7 @@ class HavenApp {
     }
     const panel = document.getElementById('music-panel');
     if (panel) {
-      document.getElementById('music-embed-container').innerHTML = '';
+      document.getElementById('music-embed-container').textContent =  '';
       panel.style.display = 'none';
     }
     this._removeMusicIndicator();
@@ -8215,7 +8508,7 @@ class HavenApp {
 
     const savedOpacity = parseInt(localStorage.getItem('haven_pip_opacity') ?? '100');
 
-    pip.innerHTML = `
+    pip._safeHTML = `
       <div class="music-pip-header" id="music-pip-drag">
         <button class="music-pip-btn" id="music-pip-popin" title="Minimize (back to panel)">─</button>
         <span class="music-pip-label">🎵 ${platform}</span>
@@ -8378,7 +8671,7 @@ class HavenApp {
     ind = document.createElement('button');
     ind.id = 'music-indicator';
     ind.className = 'music-indicator';
-    ind.textContent = '🎵 Music playing';
+    ind.textContent = 'Music playing';
     ind.title = 'Click to show music player';
     ind.addEventListener('click', () => {
       // If PiP is active, pop back in first
@@ -8718,7 +9011,7 @@ class HavenApp {
 
     const overlay = document.createElement('div');
     overlay.className = 'risky-download-overlay';
-    overlay.innerHTML = `
+    overlay._safeHTML = `
       <div class="risky-download-modal">
         <div class="risky-download-icon">⚠️</div>
         <h3>Potentially Harmful File</h3>
@@ -8764,7 +9057,7 @@ class HavenApp {
       picker.style.display = 'none';
       return;
     }
-    picker.innerHTML = '';
+    picker.textContent =  '';
     this._emojiActiveCategory = this._emojiActiveCategory || Object.keys(this.emojiCategories)[0];
 
     // Search bar
@@ -8812,7 +9105,7 @@ class HavenApp {
 
     const self = this;
     function renderGrid(filter) {
-      grid.innerHTML = '';
+      grid.textContent =  '';
       let emojis;
       if (filter) {
         const q = filter.toLowerCase();
@@ -8836,7 +9129,7 @@ class HavenApp {
         emojis = allCategories[self._emojiActiveCategory] || self.emojis;
       }
       if (filter && emojis.length === 0) {
-        grid.innerHTML = '<p class="muted-text" style="padding:12px;font-size:12px;width:100%;text-align:center">No emoji found</p>';
+        grid._safeHTML = '<p class="muted-text" style="padding:12px;font-size:12px;width:100%;text-align:center">No emoji found</p>';
         return;
       }
       emojis.forEach(emoji => {
@@ -8847,7 +9140,7 @@ class HavenApp {
         if (customMatch) {
           const ce = self.customEmojis.find(e => e.name === customMatch[1]);
           if (ce) {
-            btn.innerHTML = `<img src="${ce.url}" alt=":${ce.name}:" title=":${ce.name}:" class="custom-emoji">`;
+            btn._safeHTML = `<img src="${ce.url}" alt=":${ce.name}:" title=":${ce.name}:" class="custom-emoji">`;
           } else {
             btn.textContent = emoji;
           }
@@ -8933,7 +9226,7 @@ class HavenApp {
 
   _loadTrendingGifs() {
     const grid = document.getElementById('gif-grid');
-    grid.innerHTML = '<div class="gif-picker-empty">Loading...</div>';
+    grid._safeHTML = '<div class="gif-picker-empty">Loading...</div>';
     fetch('/api/gif/trending?limit=20', {
       headers: { 'Authorization': `Bearer ${this.token}` }
     })
@@ -8944,19 +9237,19 @@ class HavenApp {
           return;
         }
         if (data.error) {
-          grid.innerHTML = `<div class="gif-picker-empty">${data.error}</div>`;
+          grid._safeHTML = `<div class="gif-picker-empty">${data.error}</div>`;
           return;
         }
         this._renderGifGrid(data.results || []);
       })
       .catch(() => {
-        grid.innerHTML = '<div class="gif-picker-empty">Failed to load GIFs</div>';
+        grid._safeHTML = '<div class="gif-picker-empty">Failed to load GIFs</div>';
       });
   }
 
   _searchGifs(query) {
     const grid = document.getElementById('gif-grid');
-    grid.innerHTML = '<div class="gif-picker-empty">Searching...</div>';
+    grid._safeHTML = '<div class="gif-picker-empty">Searching...</div>';
     fetch(`/api/gif/search?q=${encodeURIComponent(query)}&limit=20`, {
       headers: { 'Authorization': `Bearer ${this.token}` }
     })
@@ -8967,27 +9260,27 @@ class HavenApp {
           return;
         }
         if (data.error) {
-          grid.innerHTML = `<div class="gif-picker-empty">${data.error}</div>`;
+          grid._safeHTML = `<div class="gif-picker-empty">${data.error}</div>`;
           return;
         }
         const results = data.results || [];
         if (results.length === 0) {
-          grid.innerHTML = '<div class="gif-picker-empty">No GIFs found</div>';
+          grid._safeHTML = '<div class="gif-picker-empty">No GIFs found</div>';
           return;
         }
         this._renderGifGrid(results);
       })
       .catch(() => {
-        grid.innerHTML = '<div class="gif-picker-empty">Search failed</div>';
+        grid._safeHTML = '<div class="gif-picker-empty">Search failed</div>';
       });
   }
 
   _showGifSetupGuide(grid) {
     const isAdmin = this.user && this.user.isAdmin;
     if (isAdmin) {
-      grid.innerHTML = `
+      grid._safeHTML = `
         <div class="gif-setup-guide">
-          <h3>🎞️ Set Up GIF Search</h3>
+          <h3>Set Up GIF Search</h3>
           <p>GIF search is powered by <strong>GIPHY</strong> and needs a free API key.</p>
           <ol>
             <li>Go to <a href="https://developers.giphy.com/" target="_blank" rel="noopener">developers.giphy.com</a></li>
@@ -9000,7 +9293,7 @@ class HavenApp {
             <input type="text" id="gif-giphy-key-input" placeholder="Paste your GIPHY API key…" spellcheck="false" autocomplete="off" />
             <button id="gif-giphy-key-save">Save</button>
           </div>
-          <p class="gif-setup-note">💡 No payment required — GIPHY's free tier is generous enough for a private server.</p>
+          <p class="gif-setup-note">No payment required — GIPHY's free tier is generous enough for a private server.</p>
         </div>`;
       const saveBtn = document.getElementById('gif-giphy-key-save');
       const input = document.getElementById('gif-giphy-key-input');
@@ -9008,16 +9301,16 @@ class HavenApp {
         const key = input.value.trim();
         if (!key) return;
         this.socket.emit('update-server-setting', { key: 'giphy_api_key', value: key });
-        grid.innerHTML = '<div class="gif-picker-empty">Saved! Loading GIFs…</div>';
+        grid._safeHTML = '<div class="gif-picker-empty">Saved! Loading GIFs…</div>';
         setTimeout(() => this._loadTrendingGifs(), 500);
       });
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') saveBtn.click();
       });
     } else {
-      grid.innerHTML = `
+      grid._safeHTML = `
         <div class="gif-setup-guide">
-          <h3>🎞️ GIF Search Not Available</h3>
+          <h3>GIF Search Not Available</h3>
           <p>An admin needs to set up the GIPHY API key before GIF search can work.</p>
         </div>`;
     }
@@ -9025,7 +9318,7 @@ class HavenApp {
 
   _renderGifGrid(results) {
     const grid = document.getElementById('gif-grid');
-    grid.innerHTML = '';
+    grid.textContent =  '';
     results.forEach(gif => {
       if (!gif.tiny) return;
       const img = document.createElement('img');
@@ -9058,7 +9351,7 @@ class HavenApp {
     const picker = document.createElement('div');
     picker.id = 'gif-slash-picker';
     picker.className = 'gif-slash-picker';
-    picker.innerHTML = '<div class="gif-slash-loading">Searching GIFs...</div>';
+    picker._safeHTML = '<div class="gif-slash-loading">Searching GIFs...</div>';
 
     // Position above the message input
     const inputArea = document.querySelector('.message-input-area');
@@ -9082,14 +9375,14 @@ class HavenApp {
       .then(r => r.json())
       .then(data => {
         if (data.error === 'gif_not_configured') {
-          picker.innerHTML = '<div class="gif-slash-loading">GIF search not configured — an admin needs to set up the GIPHY API key (use the GIF button 🎞️)</div>';
+          picker._safeHTML = '<div class="gif-slash-loading">GIF search not configured — an admin needs to set up the GIPHY API key (use the GIF button 🎞️)</div>';
           return;
         }
-        if (data.error) { picker.innerHTML = `<div class="gif-slash-loading">${data.error}</div>`; return; }
+        if (data.error) { picker._safeHTML = `<div class="gif-slash-loading">${data.error}</div>`; return; }
         const results = data.results || [];
-        if (results.length === 0) { picker.innerHTML = '<div class="gif-slash-loading">No GIFs found</div>'; return; }
+        if (results.length === 0) { picker._safeHTML = '<div class="gif-slash-loading">No GIFs found</div>'; return; }
 
-        picker.innerHTML = `<div class="gif-slash-header"><span>/gif ${this._escapeHtml(query)}</span><button class="icon-btn small gif-slash-close">&times;</button></div><div class="gif-slash-grid"></div>`;
+        picker._safeHTML = `<div class="gif-slash-header"><span>/gif ${this._escapeHtml(query)}</span><button class="icon-btn small gif-slash-close">&times;</button></div><div class="gif-slash-grid"></div>`;
         const grid = picker.querySelector('.gif-slash-grid');
         picker.querySelector('.gif-slash-close').addEventListener('click', () => picker.remove());
 
@@ -9110,7 +9403,7 @@ class HavenApp {
         });
       })
       .catch(() => {
-        picker.innerHTML = '<div class="gif-slash-loading">GIF search failed</div>';
+        picker._safeHTML = '<div class="gif-slash-loading">GIF search failed</div>';
       });
   }
 
@@ -9160,7 +9453,7 @@ class HavenApp {
     // Find where to insert — after .message-content
     const content = msgEl.querySelector('.message-content');
     if (content) {
-      content.insertAdjacentHTML('afterend', html);
+      safeInsertHTML(content, 'afterend', html);
     }
 
     if (wasAtBottom) this._scrollToBottom();
@@ -9203,7 +9496,7 @@ class HavenApp {
     let activeSlot = null;
 
     const renderSlots = () => {
-      slotsRow.innerHTML = '';
+      slotsRow.textContent =  '';
       current.forEach((emoji, i) => {
         const slot = document.createElement('button');
         slot.className = 'reaction-pick-btn quick-emoji-slot' + (activeSlot === i ? ' active' : '');
@@ -9211,7 +9504,7 @@ class HavenApp {
         const customMatch = emoji.match(/^:([a-zA-Z0-9_-]+):$/);
         if (customMatch && this.customEmojis) {
           const ce = this.customEmojis.find(e => e.name === customMatch[1]);
-          if (ce) slot.innerHTML = `<img src="${ce.url}" alt="${emoji}" class="custom-emoji" style="width:20px;height:20px">`;
+          if (ce) slot._safeHTML = `<img src="${ce.url}" alt="${emoji}" class="custom-emoji" style="width:20px;height:20px">`;
           else slot.textContent = emoji;
         } else {
           slot.textContent = emoji;
@@ -9233,7 +9526,7 @@ class HavenApp {
     grid.style.maxHeight = '180px';
 
     const renderOptions = () => {
-      grid.innerHTML = '';
+      grid.textContent =  '';
       // Standard emojis
       for (const [category, emojis] of Object.entries(this.emojiCategories)) {
         const label = document.createElement('div');
@@ -9271,7 +9564,7 @@ class HavenApp {
         this.customEmojis.forEach(ce => {
           const btn = document.createElement('button');
           btn.className = 'reaction-full-btn';
-          btn.innerHTML = `<img src="${ce.url}" alt=":${ce.name}:" class="custom-emoji" style="width:22px;height:22px">`;
+          btn._safeHTML = `<img src="${ce.url}" alt=":${ce.name}:" class="custom-emoji" style="width:22px;height:22px">`;
           btn.addEventListener('click', (e) => {
             e.stopPropagation();
             if (activeSlot !== null) {
@@ -9318,7 +9611,7 @@ class HavenApp {
       const customMatch = emoji.match(/^:([a-zA-Z0-9_-]+):$/);
       if (customMatch && this.customEmojis) {
         const ce = this.customEmojis.find(e => e.name === customMatch[1]);
-        if (ce) btn.innerHTML = `<img src="${ce.url}" alt="${emoji}" class="custom-emoji" style="width:20px;height:20px">`;
+        if (ce) btn._safeHTML = `<img src="${ce.url}" alt="${emoji}" class="custom-emoji" style="width:20px;height:20px">`;
         else btn.textContent = emoji;
       } else {
         btn.textContent = emoji;
@@ -9409,7 +9702,7 @@ class HavenApp {
     grid.className = 'reaction-full-grid';
 
     const renderAll = (filter) => {
-      grid.innerHTML = '';
+      grid.textContent =  '';
       const lowerFilter = filter ? filter.toLowerCase() : '';
       for (const [category, emojis] of Object.entries(this.emojiCategories)) {
         const matching = lowerFilter
@@ -9458,7 +9751,7 @@ class HavenApp {
           customMatching.forEach(ce => {
             const btn = document.createElement('button');
             btn.className = 'reaction-full-btn';
-            btn.innerHTML = `<img src="${ce.url}" alt=":${ce.name}:" title=":${ce.name}:" class="custom-emoji">`;
+            btn._safeHTML = `<img src="${ce.url}" alt=":${ce.name}:" title=":${ce.name}:" class="custom-emoji">`;
             btn.addEventListener('click', () => {
               this.socket.emit('add-reaction', { messageId: msgId, emoji: `:${ce.name}:` });
               panel.remove();
@@ -9524,7 +9817,7 @@ class HavenApp {
 
     const bar = document.getElementById('reply-bar');
     bar.style.display = 'flex';
-    document.getElementById('reply-preview-text').innerHTML =
+    document.getElementById('reply-preview-text')._safeHTML =
       `Replying to <strong>${this._escapeHtml(author)}</strong>: ${this._escapeHtml(preview)}`;
     document.getElementById('message-input').focus();
   }
@@ -9551,7 +9844,7 @@ class HavenApp {
 
     // Replace content with an editable textarea
     const originalHtml = contentEl.innerHTML;
-    contentEl.innerHTML = '';
+    contentEl.textContent =  '';
     msgEl.classList.add('editing'); // hide toolbar while editing
 
     const textarea = document.createElement('textarea');
@@ -9563,7 +9856,7 @@ class HavenApp {
 
     const btnRow = document.createElement('div');
     btnRow.className = 'edit-actions';
-    btnRow.innerHTML = '<button class="edit-save-btn">Save</button><button class="edit-cancel-btn">Cancel</button>';
+    btnRow._safeHTML = '<button class="edit-save-btn">Save</button><button class="edit-cancel-btn">Cancel</button>';
     contentEl.appendChild(btnRow);
 
     textarea.focus();
@@ -9572,7 +9865,7 @@ class HavenApp {
 
     const cancel = () => {
       msgEl.classList.remove('editing');
-      contentEl.innerHTML = originalHtml;
+      contentEl._safeHTML = originalHtml;
     };
 
     btnRow.querySelector('.edit-cancel-btn').addEventListener('click', (e) => {
@@ -9653,10 +9946,10 @@ class HavenApp {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay transfer-admin-overlay';
     overlay.style.display = 'flex';
-    overlay.innerHTML = `
+    overlay._safeHTML = `
       <div class="modal transfer-admin-modal">
         <div class="modal-header">
-          <h4>🔑 Transfer Admin</h4>
+          <h4>Transfer Admin</h4>
           <button class="modal-close-btn transfer-admin-close">&times;</button>
         </div>
         <div class="modal-body">
@@ -9801,7 +10094,7 @@ class HavenApp {
     const nextBtn = document.getElementById('wizard-next-btn');
     if (nextBtn) {
       if (step === 4) {
-        nextBtn.textContent = '🚀 Get Started';
+        nextBtn.textContent = 'Get Started';
       } else if (step === 2 && !this._wizardChannelCode) {
         nextBtn.textContent = 'Create & Continue →';
       } else {
@@ -9809,26 +10102,46 @@ class HavenApp {
       }
     }
 
-    // Step 4 summary
+    // Step 4 summary — show invite link
     if (step === 4) {
       const chanSummary = document.getElementById('wizard-summary-channel');
       if (chanSummary) {
         chanSummary.textContent = this._wizardChannelCode
-          ? `✅ Channel created (code: ${this._wizardChannelCode})`
+          ? `Channel created (code: ${this._wizardChannelCode})`
           : '⏭️ No channel created (you can create one from the sidebar)';
       }
       const portSummary = document.getElementById('wizard-summary-port');
       if (portSummary) {
-        if (this._wizardPortResult === true) portSummary.textContent = '✅ Port is open — friends can connect from anywhere';
-        else if (this._wizardPortResult === false) portSummary.textContent = '⚠️ Port not reachable — check port forwarding for remote access';
+        if (this._wizardPortResult === true) portSummary.textContent = 'Port is open — friends can connect from anywhere';
+        else if (this._wizardPortResult === false) portSummary.textContent = 'Port not reachable — check port forwarding for remote access';
         else portSummary.textContent = '⏭️ Port check skipped';
       }
 
-      // Set final URL
+      // Fetch and display invite URL
+      fetch('/api/server-info', {
+        headers: { 'Authorization': `Bearer ${this.token}` }
+      }).then(r => r.json()).then(info => {
+        const urlEl = document.getElementById('wizard-invite-url');
+        const codeEl = document.getElementById('wizard-invite-code');
+        const copyBtn = document.getElementById('wizard-copy-invite-link');
+        if (urlEl && info.inviteUrl) urlEl.textContent = info.inviteUrl;
+        if (codeEl && info.inviteCode) codeEl.textContent = info.inviteCode;
+        if (copyBtn && info.inviteUrl) {
+          copyBtn.onclick = () => {
+            navigator.clipboard.writeText(info.inviteUrl).then(() => {
+              copyBtn.textContent = 'Copied!';
+              setTimeout(() => copyBtn.textContent = 'Copy Link', 2000);
+            });
+          };
+        }
+      }).catch(() => {});
+
+      // Set final URL (fallback)
       const urlEl = document.getElementById('wizard-final-url');
-      if (urlEl && this._wizardPublicIp) {
+      if (urlEl) {
         const port = location.port || (location.protocol === 'https:' ? '443' : '80');
-        urlEl.textContent = `${location.protocol}//${this._wizardPublicIp}:${port}`;
+        const host = this._wizardPublicIp || location.hostname;
+        urlEl.textContent = `${location.protocol}//${host}:${port}`;
       }
     }
   }
@@ -9868,7 +10181,10 @@ class HavenApp {
           this.socket.off('channel-created', handler);
         };
         this.socket.on('channel-created', handler);
-        this.socket.emit('create-channel', { name: channelName });
+        this.socket.emit('create-channel', { 
+          name: channelName, 
+          guild_id: this.currentGuild ? this.currentGuild.id : null 
+        });
       } else {
         this._wizardStep = 3;
         this._wizardUpdateUI();
@@ -9912,18 +10228,18 @@ class HavenApp {
 
       if (data.reachable) {
         this._wizardPortResult = true;
-        result.innerHTML = `
+        result._safeHTML = `
           <div class="wizard-port-success">
-            ✅ <strong>Your server is reachable from the internet!</strong><br>
+            <strong>Your server is reachable from the internet!</strong><br>
             Public IP: <code>${data.publicIp}</code><br>
-            Friends can connect at: <code>${location.protocol}//${data.publicIp}:${location.port || 3000}</code>
+            Friends can connect at: <code>${location.protocol}//${data.publicIp}:${location.port || (location.protocol === 'https:' ? '443' : '80')}</code>
           </div>`;
       } else {
         this._wizardPortResult = false;
-        const port = location.port || 3000;
-        result.innerHTML = `
+        const port = location.port || (location.protocol === 'https:' ? '443' : '80');
+        result._safeHTML = `
           <div class="wizard-port-fail">
-            ⚠️ <strong>Port ${port} is not reachable from the internet.</strong><br>
+            <strong>Port ${port} is not reachable from the internet.</strong><br>
             ${data.publicIp ? `Your public IP is <code>${data.publicIp}</code>, but the port is blocked.` : data.error || 'Could not reach port.'}<br><br>
             <strong>To fix this:</strong>
             <ol>
@@ -9936,7 +10252,7 @@ class HavenApp {
             <strong>LAN only?</strong> If friends are on the same WiFi, this doesn't matter — they can connect directly.
           </div>`;
         if (checkBtn) {
-          checkBtn.textContent = '🔄 Re-check';
+          checkBtn.textContent = 'Re-check';
           checkBtn.style.display = '';
         }
       }
@@ -9944,10 +10260,10 @@ class HavenApp {
       if (checking) checking.style.display = 'none';
       if (result) {
         result.style.display = 'block';
-        result.innerHTML = `<div class="wizard-port-fail">❌ Check failed: ${err.message}. You may be offline.</div>`;
+        result._safeHTML = `<div class="wizard-port-fail">Check failed: ${err.message}. You may be offline.</div>`;
       }
       if (checkBtn) {
-        checkBtn.textContent = '🔄 Retry';
+        checkBtn.textContent = 'Retry';
         checkBtn.style.display = '';
       }
     }
@@ -10008,13 +10324,15 @@ class HavenApp {
       if (typeof this._renderPermThresholds === 'function') this._renderPermThresholds();
     }
 
-    // Server invite code — always update even while modal is open (live action, not Save flow)
+    // Server invite code & link — always update even while modal is open (live action, not Save flow)
     const serverCodeEl = document.getElementById('server-code-value');
     if (serverCodeEl) {
       const code = this.serverSettings.server_code;
       serverCodeEl.textContent = code || '—';
       serverCodeEl.style.opacity = code ? '1' : '0.4';
     }
+    // Update invite URL display
+    this._updateInviteUrlDisplay();
 
     // Always update visual branding regardless of modal state
     this._applyServerBranding();
@@ -10030,11 +10348,11 @@ class HavenApp {
     const container = document.getElementById('webhooks-list');
     if (!container) return;
     if (!webhooks.length) {
-      container.innerHTML = '<p class="muted-text">No bots configured</p>';
+      container._safeHTML = '<p class="muted-text">No bots configured</p>';
       return;
     }
     // Simple preview list for server settings — full management is in the bot modal
-    container.innerHTML = webhooks.map(wh => {
+    container._safeHTML = webhooks.map(wh => {
       const statusDot = wh.is_active ? '🟢' : '🔴';
       const avatarHtml = wh.avatar_url
         ? `<img src="${this._escapeHtml(wh.avatar_url)}" style="width:20px;height:20px;border-radius:50%;object-fit:cover">`
@@ -10150,10 +10468,10 @@ class HavenApp {
     const el = document.getElementById('whitelist-list');
     if (!el) return;
     if (!list || list.length === 0) {
-      el.innerHTML = '<p class="muted-text">No whitelisted users</p>';
+      el._safeHTML = '<p class="muted-text">No whitelisted users</p>';
       return;
     }
-    el.innerHTML = list.map(w => `
+    el._safeHTML = list.map(w => `
       <div class="whitelist-item">
         <span class="whitelist-username">${this._escapeHtml(w.username)}</span>
         <button class="btn-sm btn-danger-sm whitelist-remove-btn" data-username="${this._escapeHtml(w.username)}">✕</button>
@@ -10223,9 +10541,9 @@ class HavenApp {
     const preview = document.getElementById('server-icon-preview');
     if (preview) {
       if (icon) {
-        preview.innerHTML = `<img src="${icon}" alt="Server Icon">`;
+        preview._safeHTML = `<img src="${icon}" alt="Server Icon">`;
       } else {
-        preview.innerHTML = '<span class="server-icon-text">⬡</span>';
+        preview._safeHTML = '<span class="server-icon-text">⬡</span>';
       }
     }
   }
@@ -10265,10 +10583,10 @@ class HavenApp {
   _renderBanList(bans) {
     const list = document.getElementById('bans-list');
     if (bans.length === 0) {
-      list.innerHTML = '<p class="muted-text">No banned users</p>';
+      list._safeHTML = '<p class="muted-text">No banned users</p>';
       return;
     }
-    list.innerHTML = bans.map(b => `
+    list._safeHTML = bans.map(b => `
       <div class="ban-item">
         <div class="ban-info">
           <strong>${this._escapeHtml(b.username)}</strong>
@@ -10330,7 +10648,7 @@ class HavenApp {
       return;
     }
 
-    dropdown.innerHTML = filtered.map((m, i) =>
+    dropdown._safeHTML = filtered.map((m, i) =>
       `<div class="mention-item${i === 0 ? ' active' : ''}" data-username="${this._escapeHtml(m.username)}">${this._escapeHtml(m.username)}</div>`
     ).join('');
 
@@ -10403,7 +10721,7 @@ class HavenApp {
 
   _showEmojiDropdown(query) {
     const dd = document.getElementById('emoji-dropdown');
-    dd.innerHTML = '';
+    dd.textContent =  '';
 
     let results = [];
 
@@ -10526,7 +10844,7 @@ class HavenApp {
 
     const shown = query === '' ? this.slashCommands.slice(0, 12) : filtered;
 
-    dropdown.innerHTML = shown.map((c, i) =>
+    dropdown._safeHTML = shown.map((c, i) =>
       `<div class="slash-item${i === 0 ? ' active' : ''}" data-cmd="${c.cmd}">
         <span class="slash-cmd">/${c.cmd}</span>
         ${c.args ? `<span class="slash-args">${this._escapeHtml(c.args)}</span>` : ''}
@@ -10602,7 +10920,7 @@ class HavenApp {
     picker.id = 'status-picker';
     picker.className = 'status-picker';
     picker.style.display = 'none';
-    picker.innerHTML = `
+    picker._safeHTML = `
       <div class="status-option" data-status="online"><span class="user-dot"></span> Online</div>
       <div class="status-option" data-status="away"><span class="user-dot away"></span> Away</div>
       <div class="status-option" data-status="dnd"><span class="user-dot dnd"></span> Do Not Disturb</div>
@@ -10752,7 +11070,7 @@ class HavenApp {
     input.value = '';
   }
 
-  /** Upload any file via /api/upload-file — used by drag & drop, paste, and 📎 button */
+  /** Upload any file via /api/upload-file — used by drag & drop, paste, and button */
   _uploadGeneralFile(file) {
     if (!this.currentChannel) return this._showToast('Select a channel first', 'error');
     const maxMb = parseInt(this.serverSettings?.max_upload_mb) || 25;
@@ -10953,7 +11271,7 @@ class HavenApp {
       statusText.textContent    = 'Uploading...';
       dropzone.style.display    = '';
       fileInput.value           = '';
-      channelList.innerHTML     = '';
+      channelList.textContent     =  '';
       currentImportId           = null;
       currentPreview            = null;
       // Reset connect tab state
@@ -11099,14 +11417,14 @@ class HavenApp {
         document.getElementById('import-discord-username').textContent = data.user.username;
 
         const serverList = document.getElementById('import-server-list');
-        serverList.innerHTML = '';
+        serverList.textContent =  '';
         data.guilds.forEach(g => {
           const card = document.createElement('button');
           card.className = 'import-server-card';
           const iconUrl = g.icon
             ? `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png?size=64`
             : '';
-          card.innerHTML = `
+          card._safeHTML = `
             ${iconUrl ? `<img src="${iconUrl}" alt="" class="import-server-icon">` : '<span class="import-server-icon-placeholder">🏠</span>'}
             <span class="import-server-name">${this._escapeHtml(g.name)}</span>
           `;
@@ -11114,7 +11432,7 @@ class HavenApp {
           serverList.appendChild(card);
         });
       } catch (err) {
-        connectStatus.textContent = '❌ ' + err.message;
+        connectStatus.textContent = '' + err.message;
         connectStatus.style.color = '#ed4245';
       } finally {
         connectBtn.disabled = false;
@@ -11236,13 +11554,13 @@ class HavenApp {
       document.getElementById('import-total-msgs').textContent = `${result.totalMessages.toLocaleString()} messages total`;
 
       // Build channel list
-      channelList.innerHTML = '';
+      channelList.textContent =  '';
       result.channels.forEach(ch => {
         const row = document.createElement('div');
         row.className = 'import-channel-row';
         row.dataset.discordId = ch.discordId || '';
         row.dataset.originalName = ch.name;
-        row.innerHTML = `
+        row._safeHTML = `
           <label>
             <input type="checkbox" checked>
             <span class="import-ch-name">
@@ -11255,7 +11573,7 @@ class HavenApp {
       });
 
     } catch (err) {
-      statusText.textContent = '❌ ' + err.message;
+      statusText.textContent = '' + err.message;
       progressFill.style.width = '100%';
       progressFill.style.background = '#ed4245';
       setTimeout(() => {
@@ -11291,7 +11609,7 @@ class HavenApp {
       if (!res.ok) throw new Error(data.error || 'Failed to load channels');
 
       const cList = document.getElementById('import-connect-channel-list');
-      cList.innerHTML = '';
+      cList.textContent =  '';
       let lastCategory = null;
 
       // Type icons for visual distinction
@@ -11316,7 +11634,7 @@ class HavenApp {
         row.dataset.channelName = ch.name;
         row.dataset.channelTopic = ch.topic || '';
         row.dataset.channelCategory = ch.category || '';
-        row.innerHTML = `
+        row._safeHTML = `
           <label>
             <input type="checkbox" checked>
             <span class="import-ch-name">${icon} ${this._escapeHtml(ch.name)}${tagHint}</span>
@@ -11338,7 +11656,7 @@ class HavenApp {
             tRow.dataset.channelName = t.name;
             tRow.dataset.channelTopic = '';
             tRow.dataset.channelCategory = ch.category || '';
-            tRow.innerHTML = `
+            tRow._safeHTML = `
               <label>
                 <input type="checkbox" checked>
                 <span class="import-ch-name">🧵 ${this._escapeHtml(t.name)}${tagStr}</span>
@@ -11366,7 +11684,7 @@ class HavenApp {
             tRow.dataset.channelName = t.name;
             tRow.dataset.channelTopic = '';
             tRow.dataset.channelCategory = t.category || '';
-            tRow.innerHTML = `
+            tRow._safeHTML = `
               <label>
                 <input type="checkbox" checked>
                 <span class="import-ch-name">🧵 ${this._escapeHtml(t.name)}${t.parentName ? ` <span class="muted-text" style="font-size:10px">in #${this._escapeHtml(t.parentName)}</span>` : ''}</span>
@@ -11381,7 +11699,7 @@ class HavenApp {
       this._connectGuild = guild;
       fetchStatus.style.display = 'none';
     } catch (err) {
-      fetchStatus.textContent = '❌ ' + err.message;
+      fetchStatus.textContent = '' + err.message;
       fetchStatus.style.color = '#ed4245';
     }
   }
@@ -11440,13 +11758,13 @@ class HavenApp {
       document.getElementById('import-server-name').textContent = result.serverName;
       document.getElementById('import-total-msgs').textContent = `${result.totalMessages.toLocaleString()} messages total`;
 
-      channelList.innerHTML = '';
+      channelList.textContent =  '';
       result.channels.forEach(ch => {
         const row = document.createElement('div');
         row.className = 'import-channel-row';
         row.dataset.discordId = ch.discordId || '';
         row.dataset.originalName = ch.name;
-        row.innerHTML = `
+        row._safeHTML = `
           <label>
             <input type="checkbox" checked>
             <span class="import-ch-name">
@@ -11458,11 +11776,11 @@ class HavenApp {
         channelList.appendChild(row);
       });
     } catch (err) {
-      fetchStatus.textContent = '❌ ' + err.message;
+      fetchStatus.textContent = '' + err.message;
       fetchStatus.style.color = '#ed4245';
     } finally {
       fetchBtn.disabled = false;
-      fetchBtn.textContent = '📥 Fetch Messages';
+      fetchBtn.textContent = 'Fetch Messages';
     }
   }
 
@@ -11498,7 +11816,7 @@ class HavenApp {
       alert('Import failed: ' + err.message);
     } finally {
       executeBtn.disabled = false;
-      executeBtn.textContent = '📦 Import Selected';
+      executeBtn.textContent = 'Import Selected';
     }
   }
 
@@ -11565,10 +11883,10 @@ class HavenApp {
     const container = document.getElementById('roles-list-preview');
     if (!container) return;
     if (this._allRoles.length === 0) {
-      container.innerHTML = '<p class="muted-text">No custom roles</p>';
+      container._safeHTML = '<p class="muted-text">No custom roles</p>';
       return;
     }
-    container.innerHTML = this._allRoles.map(r =>
+    container._safeHTML = this._allRoles.map(r =>
       `<div class="role-preview-item">
         <span class="role-color-dot" style="background:${r.color || '#aaa'}"></span>
         <span>${this._escapeHtml(r.name)}${r.auto_assign ? ' <span title="Auto-assigned to new members" style="font-size:10px;opacity:0.6">⚡</span>' : ''}</span>
@@ -11585,7 +11903,7 @@ class HavenApp {
   _renderRoleSidebar() {
     const list = document.getElementById('role-list-sidebar');
     if (!list) return;
-    list.innerHTML = this._allRoles.map(r =>
+    list._safeHTML = this._allRoles.map(r =>
       `<div class="role-sidebar-item${this._selectedRoleId === r.id ? ' active' : ''}" data-role-id="${r.id}">
         <span class="role-color-dot" style="background:${r.color || '#aaa'}"></span>
         ${this._escapeHtml(r.name)}
@@ -11603,7 +11921,7 @@ class HavenApp {
   _renderRoleDetail() {
     const panel = document.getElementById('role-detail-panel');
     const role = this._allRoles.find(r => r.id === this._selectedRoleId);
-    if (!role) { panel.innerHTML = '<p class="muted-text" style="padding:20px;text-align:center">Select a role</p>'; return; }
+    if (!role) { panel._safeHTML = '<p class="muted-text" style="padding:20px;text-align:center">Select a role</p>'; return; }
 
     const allPerms = [
       'edit_own_messages', 'delete_own_messages', 'delete_message', 'delete_lower_messages',
@@ -11625,7 +11943,7 @@ class HavenApp {
     };
     const rolePerms = role.permissions || [];
 
-    panel.innerHTML = `
+    panel._safeHTML = `
       <div class="role-detail-form">
         <label class="settings-label">Name</label>
         <input type="text" class="settings-text-input" id="role-edit-name" value="${this._escapeHtml(role.name)}" maxlength="30">
@@ -11694,9 +12012,9 @@ class HavenApp {
     const modal = document.getElementById('channel-roles-modal');
     const ch = this.channels.find(c => c.code === channelCode);
     document.getElementById('channel-roles-channel-name').textContent = ch ? `# ${ch.name}` : '';
-    document.getElementById('channel-roles-member-list').innerHTML = '<p class="channel-roles-no-members">Loading…</p>';
+    document.getElementById('channel-roles-member-list')._safeHTML = '<p class="channel-roles-no-members">Loading…</p>';
     document.getElementById('channel-roles-actions').style.display = 'none';
-    document.getElementById('channel-roles-role-detail').innerHTML =
+    document.getElementById('channel-roles-role-detail')._safeHTML =
       '<p class="muted-text" style="padding:12px;text-align:center;font-size:0.82rem">Select a role to configure</p>';
     modal.style.display = 'flex';
 
@@ -11705,7 +12023,7 @@ class HavenApp {
       this._renderChannelRolesRoleList();
       this.socket.emit('get-channel-member-roles', { code: channelCode }, (res) => {
         if (res.error) {
-          document.getElementById('channel-roles-member-list').innerHTML =
+          document.getElementById('channel-roles-member-list')._safeHTML =
             `<p class="channel-roles-no-members">${this._escapeHtml(res.error)}</p>`;
           return;
         }
@@ -11714,7 +12032,7 @@ class HavenApp {
         this._renderChannelRolesMembers();
         // Populate role dropdown
         const roleSel = document.getElementById('channel-roles-role-select');
-        roleSel.innerHTML = '<option value="">-- Select Role --</option>' +
+        roleSel._safeHTML = '<option value="">-- Select Role --</option>' +
           this._allRoles.map(r =>
             `<option value="${r.id}">● ${this._escapeHtml(r.name)} — Lv.${r.level}</option>`
           ).join('');
@@ -11725,7 +12043,7 @@ class HavenApp {
   _renderChannelRolesMembers() {
     const list = document.getElementById('channel-roles-member-list');
     if (!this._channelRolesMembers.length) {
-      list.innerHTML = '<p class="channel-roles-no-members">No members in this channel</p>';
+      list._safeHTML = '<p class="channel-roles-no-members">No members in this channel</p>';
       return;
     }
 
@@ -11734,14 +12052,14 @@ class HavenApp {
       a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' })
     );
 
-    list.innerHTML = sorted.map(m => {
+    list._safeHTML = sorted.map(m => {
       const sel = this._channelRolesSelectedUser === m.id ? ' selected' : '';
       const avatarSrc = m.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(m.loginName)}`;
       const shapeClass = m.avatarShape === 'square' ? ' square' : '';
       const badges = m.isAdmin
         ? '<span class="channel-roles-badge badge-admin"><span class="badge-dot" style="background:#e74c3c"></span>Admin</span>'
         : (m.roles || []).map(r =>
-            `<span class="channel-roles-badge"><span class="badge-dot" style="background:${r.color || '#aaa'}"></span>${this._escapeHtml(r.name)}<span class="badge-scope">${r.scope === 'channel' ? '📌 Channel' : '🌐 Server'}</span><span class="revoke-btn" data-uid="${m.id}" data-rid="${r.roleId}" data-scope="${r.scope}" title="Revoke">✕</span></span>`
+            `<span class="channel-roles-badge"><span class="badge-dot" style="background:${r.color || '#aaa'}"></span>${this._escapeHtml(r.name)}<span class="badge-scope">${r.scope === 'channel' ? 'Channel' : 'Server'}</span><span class="revoke-btn" data-uid="${m.id}" data-rid="${r.roleId}" data-scope="${r.scope}" title="Revoke">✕</span></span>`
           ).join('') || '<span class="channel-roles-no-role">No roles</span>';
 
       return `<div class="channel-roles-member${sel}" data-uid="${m.id}">
@@ -11792,7 +12110,7 @@ class HavenApp {
 
     // Admins cannot modify their own roles
     if (member.isAdmin && member.id === this.user.id) {
-      currentDiv.innerHTML = '<span class="channel-roles-badge" style="background:rgba(231,76,60,0.2);color:#e74c3c"><span class="badge-dot" style="background:#e74c3c"></span>Admin</span>';
+      currentDiv._safeHTML = '<span class="channel-roles-badge" style="background:rgba(231,76,60,0.2);color:#e74c3c"><span class="badge-dot" style="background:#e74c3c"></span>Admin</span>';
       const assignArea = panel.querySelector('.channel-roles-assign-area');
       if (assignArea) assignArea.style.display = 'none';
       return;
@@ -11802,13 +12120,13 @@ class HavenApp {
     if (assignArea) assignArea.style.display = '';
 
     if (member.isAdmin) {
-      currentDiv.innerHTML = '<span class="channel-roles-badge badge-admin"><span class="badge-dot" style="background:#e74c3c"></span>Admin</span>';
+      currentDiv._safeHTML = '<span class="channel-roles-badge badge-admin"><span class="badge-dot" style="background:#e74c3c"></span>Admin</span>';
     } else if (member.roles.length) {
-      currentDiv.innerHTML = member.roles.map(r =>
-        `<span class="channel-roles-badge"><span class="badge-dot" style="background:${r.color || '#aaa'}"></span>${this._escapeHtml(r.name)} <span class="badge-scope">${r.scope === 'channel' ? '📌 Channel' : '🌐 Server'}</span></span>`
+      currentDiv._safeHTML = member.roles.map(r =>
+        `<span class="channel-roles-badge"><span class="badge-dot" style="background:${r.color || '#aaa'}"></span>${this._escapeHtml(r.name)} <span class="badge-scope">${r.scope === 'channel' ? 'Channel' : 'Server'}</span></span>`
       ).join('');
     } else {
-      currentDiv.innerHTML = '<span style="font-size:0.78rem;color:var(--text-muted)">No roles assigned</span>';
+      currentDiv._safeHTML = '<span style="font-size:0.78rem;color:var(--text-muted)">No roles assigned</span>';
     }
   }
 
@@ -11851,10 +12169,10 @@ class HavenApp {
     const list = document.getElementById('channel-roles-role-list');
     if (!list) return;
     if (!this._allRoles.length) {
-      list.innerHTML = '<p style="font-size:0.82rem;color:var(--text-muted);text-align:center;padding:8px">No roles yet</p>';
+      list._safeHTML = '<p style="font-size:0.82rem;color:var(--text-muted);text-align:center;padding:8px">No roles yet</p>';
       return;
     }
-    list.innerHTML = this._allRoles.map(r =>
+    list._safeHTML = this._allRoles.map(r =>
       `<div class="channel-roles-role-item${this._channelRolesSelectedRole === r.id ? ' active' : ''}" data-role-id="${r.id}">
         <span class="role-color-dot" style="background:${r.color || '#aaa'}"></span>
         <span class="channel-roles-role-name">${this._escapeHtml(r.name)}</span>
@@ -11874,7 +12192,7 @@ class HavenApp {
     const panel = document.getElementById('channel-roles-role-detail');
     const role = this._allRoles.find(r => r.id === this._channelRolesSelectedRole);
     if (!role) {
-      panel.innerHTML = '<p class="muted-text" style="padding:12px;text-align:center;font-size:0.82rem">Select a role to configure</p>';
+      panel._safeHTML = '<p class="muted-text" style="padding:12px;text-align:center;font-size:0.82rem">Select a role to configure</p>';
       return;
     }
 
@@ -11898,7 +12216,7 @@ class HavenApp {
     };
     const rolePerms = role.permissions || [];
 
-    panel.innerHTML = `
+    panel._safeHTML = `
       <div class="cr-role-form">
         <div class="cr-role-form-row">
           <label class="cr-role-label">Name</label>
@@ -11991,7 +12309,7 @@ class HavenApp {
   _refreshChannelRolesDropdown() {
     const roleSel = document.getElementById('channel-roles-role-select');
     if (!roleSel) return;
-    roleSel.innerHTML = '<option value="">-- Select Role --</option>' +
+    roleSel._safeHTML = '<option value="">-- Select Role --</option>' +
       this._allRoles.map(r =>
         `<option value="${r.id}">● ${this._escapeHtml(r.name)} — Lv.${r.level}</option>`
       ).join('');
@@ -12004,7 +12322,7 @@ class HavenApp {
 
     // Populate role select with color-coded level info
     const sel = document.getElementById('assign-role-select');
-    sel.innerHTML = '<option value="">-- Select Role --</option>' + this._allRoles.map(r =>
+    sel._safeHTML = '<option value="">-- Select Role --</option>' + this._allRoles.map(r =>
       `<option value="${r.id}">● ${this._escapeHtml(r.name)} — Lv.${r.level}</option>`
     ).join('');
 
@@ -12018,7 +12336,7 @@ class HavenApp {
       subMap[c.parent_channel_id].push(c);
     });
 
-    let scopeHtml = '<option value="server">🌐 Server-wide</option>';
+    let scopeHtml = '<option value="server">Server-wide</option>';
     parents.forEach(p => {
       scopeHtml += `<option value="${p.id}"># ${this._escapeHtml(p.name)}</option>`;
       const subs = subMap[p.id] || [];
@@ -12026,7 +12344,7 @@ class HavenApp {
         scopeHtml += `<option value="${s.id}">&nbsp;&nbsp;└ ${this._escapeHtml(s.name)}</option>`;
       });
     });
-    scopeSel.innerHTML = scopeHtml;
+    scopeSel._safeHTML = scopeHtml;
     modal.style.display = 'flex';
   }
 
@@ -12041,58 +12359,6 @@ class HavenApp {
     this._markReadTimer = setTimeout(() => {
       this.socket.emit('mark-read', { code: this.currentChannel, messageId });
     }, 500);
-  }
-
-  // ── Update Checker ─────────────────────────────────────
-  async _checkForUpdates() {
-    try {
-      // Get local version from the server
-      const localRes = await fetch('/api/version');
-      if (!localRes.ok) return;
-      const { version: localVersion } = await localRes.json();
-
-      // Check GitHub for latest release
-      const ghRes = await fetch('https://api.github.com/repos/ancsemi/Haven/releases/latest', {
-        headers: { Accept: 'application/vnd.github.v3+json' }
-      });
-      if (!ghRes.ok) return;
-      const release = await ghRes.json();
-
-      const remoteVersion = (release.tag_name || '').replace(/^v/, '');
-      if (!remoteVersion || !localVersion) return;
-
-      if (this._isNewerVersion(remoteVersion, localVersion)) {
-        const banner = document.getElementById('update-banner');
-        if (banner) {
-          banner.style.display = 'inline-flex';
-          banner.querySelector('.update-text').textContent = `Update v${remoteVersion}`;
-          banner.title = `Haven v${remoteVersion} is available (you have v${localVersion}). Click to view.`;
-          // Link to release page (or zip download if available)
-          const zipAsset = (release.assets || []).find(a => a.name && a.name.endsWith('.zip'));
-          banner.href = zipAsset ? zipAsset.browser_download_url : release.html_url;
-        }
-      }
-    } catch (e) {
-      // Silently fail — update check is non-critical
-    }
-
-    // Re-check every 30 minutes
-    setTimeout(() => this._checkForUpdates(), 30 * 60 * 1000);
-  }
-
-  /**
-   * Compare semver strings. Returns true if remote > local.
-   */
-  _isNewerVersion(remote, local) {
-    const r = remote.split('.').map(Number);
-    const l = local.split('.').map(Number);
-    for (let i = 0; i < Math.max(r.length, l.length); i++) {
-      const rv = r[i] || 0;
-      const lv = l[i] || 0;
-      if (rv > lv) return true;
-      if (rv < lv) return false;
-    }
-    return false;
   }
 
   /* ── E2E Encryption Helpers ──────────────────────────── */
@@ -12116,7 +12382,7 @@ class HavenApp {
         // If keys were auto-reset during init (backup unwrap failed), notify
         if (this.e2e.keysWereReset) {
           setTimeout(() => {
-            this._appendE2ENotice(`🔄 Encryption keys were regenerated — ${new Date().toLocaleString()}. Previous encrypted messages may no longer be decryptable.`);
+            this._appendE2ENotice(`Encryption keys were regenerated — ${new Date().toLocaleString()}. Previous encrypted messages may no longer be decryptable.`);
           }, 500);
         }
       } else {
@@ -12188,11 +12454,9 @@ class HavenApp {
       this._retryDecryptForUser(data.userId);
     });
 
-    console.log('[E2E] Listeners attached, key published');
 
     // Listen for key sync from another session of the same user
     this.socket.on('e2e-key-sync', async () => {
-      console.log('[E2E] Key changed on another session — syncing...');
       const wrappingKey = this._e2eWrappingKey || sessionStorage.getItem('haven_e2e_wrap') || null;
       if (wrappingKey && this.e2e) {
         const synced = await this.e2e.syncFromServer(this.socket, wrappingKey);
@@ -12453,9 +12717,9 @@ class HavenApp {
           if (e.target === overlay) overlay.style.display = 'none';
         });
       }
-      overlay.innerHTML = `
+      overlay._safeHTML = `
         <div class="modal" style="max-width:420px;text-align:center">
-          <h3 style="margin-bottom:8px">🔐 Verify Encryption</h3>
+          <h3 style="margin-bottom:8px">Verify Encryption</h3>
           <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
             Compare this safety number with <strong>${this._escapeHtml(partnerName)}</strong> using another channel (in person, phone call, text, etc.). If they match, your conversation is end-to-end encrypted and no one is intercepting.
           </p>
@@ -12496,9 +12760,9 @@ class HavenApp {
         if (e.target === overlay) overlay.style.display = 'none';
       });
     }
-    overlay.innerHTML = `
+    overlay._safeHTML = `
       <div class="modal e2e-reset-modal">
-        <h3>⚠️ Reset Encryption Keys</h3>
+        <h3>Reset Encryption Keys</h3>
         <div class="e2e-reset-warning">
           <strong>This action is irreversible.</strong> Resetting your encryption keys will:
           <ul>
@@ -12573,10 +12837,9 @@ class HavenApp {
       this._dmPublicKeys = {};
 
       // Post a timestamped notice in the current chat
-      this._appendE2ENotice(`🔄 Encryption keys were reset — ${new Date().toLocaleString()}. Previous encrypted messages in this conversation can no longer be decrypted.`);
+      this._appendE2ENotice(`Encryption keys were reset — ${new Date().toLocaleString()}. Previous encrypted messages in this conversation can no longer be decrypted.`);
 
       this._showToast('Encryption keys reset successfully', 'success');
-      console.log('[E2E] Keys reset by user');
     } catch (err) {
       console.error('[E2E] Key reset error:', err);
       this._showToast('Key reset failed: ' + err.message, 'error');
